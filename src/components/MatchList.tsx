@@ -111,14 +111,17 @@ export default function MatchList({
   }
 
   function teamLabel(name: string | null): React.ReactNode {
-    if (!name || isPlaceholderTeam(name)) return "TBD (—) (ID —)";
-    const m = mappings[name];
+    const isTbd = !name || isPlaceholderTeam(name);
+    const effectiveName = isTbd ? "TBD" : name;
+    const m = mappings[effectiveName];
     const alias = m?.alias || "—";
     const pid = m?.platformId || "";
+
+    if (isTbd && !pid) return "TBD (—) (ID —)";
     
     return (
       <>
-        {name} ({alias}) (ID {pid ? (
+        {effectiveName} ({alias}) (ID {pid ? (
           <span className="text-blue-600 font-bold">{pid}</span>
         ) : (
           <span className="text-red-500 font-bold">ОТСУТСТВУЕТ</span>

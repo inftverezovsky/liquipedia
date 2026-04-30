@@ -55,6 +55,25 @@ export default function TeamMappingPanel({
     }
   }
 
+  async function handleDelete(name: string) {
+    if (!confirm(`Удалить маппинг для "${name}"?`)) return;
+    setSaving(name);
+    try {
+      await fetch(`/api/team-mapping?name=${encodeURIComponent(name)}`, {
+        method: "DELETE"
+      });
+      setMappings((prev) => ({
+        ...prev,
+        [name]: { alias: "", platformId: "", saved: false }
+      }));
+    } catch (err) {
+      console.error(err);
+      alert("Ошибка при удалении");
+    } finally {
+      setSaving(null);
+    }
+  }
+
   function handleChange(name: string, field: "alias" | "platformId", value: string) {
     setMappings((prev) => ({
       ...prev,
@@ -72,7 +91,7 @@ export default function TeamMappingPanel({
             <th className="border-b border-slate-200 py-2 pr-4">Liquipedia имя</th>
             <th className="border-b border-slate-200 py-2 pr-4 w-[240px]">Каноническое / альт. имя</th>
             <th className="border-b border-slate-200 py-2 pr-4 w-[160px]">Platform ID (ОБЯЗАТЕЛЬНО)</th>
-            <th className="border-b border-slate-200 py-2 pr-4 w-[120px]"></th>
+            <th className="border-b border-slate-200 py-2 pr-4 w-[220px]"></th>
           </tr>
         </thead>
         <tbody>
@@ -101,19 +120,29 @@ export default function TeamMappingPanel({
                   />
                 </td>
                 <td className="border-b border-slate-100 py-2 pr-4">
-                  <button
-                    onClick={() => handleSave(name)}
-                    disabled={isSaving || entry.saved}
-                    className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
-                      entry.saved
-                        ? "bg-green-50 text-green-600 border border-green-200"
-                        : isSaving
-                        ? "bg-slate-100 text-slate-400"
-                        : "bg-blue-600 text-white hover:bg-blue-700"
-                    }`}
-                  >
-                    {isSaving ? "..." : entry.saved ? "✓" : "Сохранить"}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => handleSave(name)}
+                      disabled={isSaving || entry.saved}
+                      className={`min-w-[100px] rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
+                        entry.saved
+                          ? "bg-green-50 text-green-600 border border-green-200"
+                          : isSaving
+                          ? "bg-slate-100 text-slate-400"
+                          : "bg-blue-600 text-white hover:bg-blue-700"
+                      }`}
+                    >
+                      {isSaving ? "..." : entry.saved ? "✓ Сохранено" : "Сохранить"}
+                    </button>
+                    <button
+                      onClick={() => handleDelete(name)}
+                      disabled={isSaving}
+                      className="rounded-lg bg-red-50 px-3 py-1.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-100 disabled:opacity-50 border border-red-100"
+                      title="Удалить маппинг"
+                    >
+                      Удалить
+                    </button>
+                  </div>
                 </td>
               </tr>
             );

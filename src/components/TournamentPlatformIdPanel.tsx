@@ -33,6 +33,24 @@ export default function TournamentPlatformIdPanel({
     }
   }
 
+  async function handleRemove() {
+    if (!confirm("Удалить ID шапки турнира?")) return;
+    setSaving(true);
+    try {
+      await fetch(`/api/dota2/tournament/${tournamentId}/platform-id`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ platformId: "" })
+      });
+      setPlatformId("");
+    } catch (error) {
+      console.error(error);
+      alert("Ошибка при удалении ID");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function handleExport() {
     const selectedIds = (window as any).selectedMatchIds || [];
     if (selectedIds.length === 0) {
@@ -75,13 +93,24 @@ export default function TournamentPlatformIdPanel({
           placeholder="Например: 554332"
           className="w-[240px] rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
         />
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          className="rounded-lg bg-slate-100 px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-200 disabled:opacity-50"
-        >
-          {saving ? "Сохранение..." : saved ? "Сохранено ✓" : "Сохранить ID"}
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="rounded-lg bg-slate-100 px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-200 disabled:opacity-50"
+          >
+            {saving ? "Сохранение..." : saved ? "Сохранено ✓" : "Сохранить ID"}
+          </button>
+          
+          <button
+            onClick={handleRemove}
+            disabled={saving}
+            className="rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-600 transition-colors hover:bg-red-100 disabled:opacity-50 border border-red-100"
+            title="Очистить ID"
+          >
+            Удалить
+          </button>
+        </div>
         
         <button
           onClick={handleExport}

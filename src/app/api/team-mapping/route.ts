@@ -50,3 +50,18 @@ export async function POST(request: Request) {
 
   return NextResponse.json({ mapping });
 }
+
+export async function DELETE(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const name = searchParams.get("name");
+
+  if (!name) {
+    return NextResponse.json({ error: "Параметр name обязателен" }, { status: 400 });
+  }
+
+  await prisma.teamMapping.deleteMany({
+    where: { liquipediaName: name.trim() }
+  });
+
+  return NextResponse.json({ success: true });
+}

@@ -1,4 +1,5 @@
 import SearchTournament from "@/components/SearchTournament";
+import DisciplinePlatformIdPanel from "@/components/DisciplinePlatformIdPanel";
 
 export default function Dota2Page() {
   return (
@@ -10,6 +11,7 @@ export default function Dota2Page() {
           Введи примерное название турнира. Данные не обновляются в фоне: поиск и загрузка происходят только по кнопке.
         </p>
       </div>
+      <DisciplinePlatformIdPanel />
       <SearchTournament />
     </div>
   );

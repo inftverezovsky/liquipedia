@@ -26,6 +26,7 @@ model Discipline {
   slug              String             @unique
   name              String
   baseApiUrl        String?
+  platformId        String?
   isEnabled         Boolean            @default(true)
   createdAt         DateTime           @default(now())
   searchRequests    SearchRequest[]

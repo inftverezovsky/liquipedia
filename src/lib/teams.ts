@@ -1,0 +1,48 @@
+/**
+ * Generates a stable internal ID for a team based on its Liquipedia name.
+ */
+export function generateInternalTeamId(name: string): string {
+  if (!name) return "tbd";
+  
+  const lowerName = name.toLowerCase().trim();
+  if (isPlaceholderTeam(lowerName)) {
+    return "tbd";
+  }
+
+  const cleaned = name
+    .replace(/\[\[([^|\]]+\|)?([^\]]+)\]\]/g, '$2') // remove wiki links [[A|B]] -> B
+    .replace(/\{\{[^}]+\}\}/g, '') // remove wiki templates {{Flag|...}}
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, '_') // spaces to underscores (user asked for hyphens, but team_team-spirit looks okay, wait, user said "replace spaces with hyphens")
+    .replace(/\s+/g, '-') 
+    .replace(/[^a-z0-9-]/g, '') // remove unsafe chars
+    .replace(/-+/g, '-') // remove double hyphens
+    .replace(/^-+|-+$/g, ''); // trim hyphens
+
+  return `team_${cleaned}`;
+}
+
+/**
+ * Checks if a team name is a placeholder (seed, winner of, TBD, etc.)
+ */
+export function isPlaceholderTeam(name: string | null | undefined): boolean {
+  if (!name) return true;
+  const n = name.trim().toLowerCase();
+  
+  // Basic placeholders
+  if (["tbd", "tba", "slot", "seed", "qualified team", "unknown", "placeholder"].includes(n)) return true;
+  
+  // Bracket seeds (A1, B2, C12, etc.) - expanded range
+  if (/^[a-h][1-9][0-9]?$/i.test(n)) return true;
+  
+  // Dynamic placeholders
+  if (n.startsWith("winner of")) return true;
+  if (n.startsWith("loser of")) return true;
+  if (n.includes("qualified")) return true;
+  if (n.includes("seed")) return true;
+  if (n.includes("group")) return true;
+  if (n.includes("bracket")) return true;
+  
+  return false;
+}

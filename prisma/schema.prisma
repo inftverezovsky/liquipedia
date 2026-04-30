@@ -1,0 +1,178 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum SearchStatus {
+  SUCCESS
+  FAILED
+  CACHED
+}
+
+enum ImportStatus {
+  PENDING
+  SUCCESS
+  PARTIAL
+  FAILED
+  MANUAL_REVIEW
+}
+
+model Discipline {
+  id                String             @id @default(cuid())
+  slug              String             @unique
+  name              String
+  baseApiUrl        String?
+  isEnabled         Boolean            @default(true)
+  createdAt         DateTime           @default(now())
+  searchRequests    SearchRequest[]
+  tournamentImports TournamentImport[]
+}
+
+model SearchRequest {
+  id           String         @id @default(cuid())
+  disciplineId String
+  discipline   Discipline     @relation(fields: [disciplineId], references: [id], onDelete: Cascade)
+  queryText    String
+  status       SearchStatus   @default(SUCCESS)
+  createdAt    DateTime       @default(now())
+  results      SearchResult[]
+
+  @@index([disciplineId, queryText, createdAt])
+}
+
+model SearchResult {
+  id              String        @id @default(cuid())
+  searchRequestId String
+  searchRequest   SearchRequest @relation(fields: [searchRequestId], references: [id], onDelete: Cascade)
+  pageId          Int
+  title           String
+  pageUrl         String
+  snippet         String?       @db.Text
+  score           Float?
+  wordCount       Int?
+  dates           String?
+  createdAt       DateTime      @default(now())
+
+  @@index([pageId])
+  @@index([title])
+}
+
+model TournamentImport {
+  id           String        @id @default(cuid())
+  disciplineId String
+  discipline   Discipline    @relation(fields: [disciplineId], references: [id], onDelete: Cascade)
+  pageId       Int?
+  pageTitle    String
+  pageUrl      String
+  status       ImportStatus  @default(PENDING)
+  startedAt    DateTime      @default(now())
+  finishedAt   DateTime?
+  errorMessage String?       @db.Text
+  rawSnapshots RawSnapshot[]
+  tournament   Tournament?   @relation("TournamentLastImport")
+
+  @@index([disciplineId, startedAt])
+  @@index([pageTitle])
+}
+
+model RawSnapshot {
+  id                 String           @id @default(cuid())
+  tournamentImportId String
+  tournamentImport   TournamentImport @relation(fields: [tournamentImportId], references: [id], onDelete: Cascade)
+  source             String
+  pageId             Int?
+  pageTitle          String
+  rawJson            Json
+  rawWikitext        String?          @db.Text
+  fetchedAt          DateTime         @default(now())
+
+  @@index([pageTitle])
+  @@index([fetchedAt])
+}
+
+model Tournament {
+  id               String                  @id @default(cuid())
+  sourcePageId     Int?
+  sourceTitle      String
+  sourceUrl        String
+  name             String
+  disciplineSlug   String
+  startDate        DateTime?
+  endDate          DateTime?
+  location         String?
+  region           String?
+  organizer        String?
+  prizePool        String?
+  formatText       String?                 @db.Text
+  status           String?
+  extractionStatus ImportStatus            @default(PARTIAL)
+  normalization    Json?
+  platformId       String?
+  lastImportId     String?                 @unique
+  lastImport       TournamentImport?       @relation("TournamentLastImport", fields: [lastImportId], references: [id])
+  participants     TournamentParticipant[]
+  matches          TournamentMatch[]
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+
+  @@unique([disciplineSlug, sourceTitle])
+  @@index([sourcePageId])
+  @@index([name])
+}
+
+model TournamentParticipant {
+  id           String     @id @default(cuid())
+  tournamentId String
+  tournament   Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  name         String
+  seed         String?
+  region       String?
+  status       String?
+  rawText      String?    @db.Text
+  createdAt    DateTime   @default(now())
+
+  @@index([tournamentId])
+  @@index([name])
+}
+
+model TournamentMatch {
+  id            String     @id @default(cuid())
+  matchId       String     @unique
+  tournamentId  String
+  tournament    Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  stage         String?
+  round         String?
+  matchDate     DateTime?
+  matchDateTime String?
+  teamAId       String?
+  teamAName     String?
+  teamBId       String?
+  teamBName     String?
+  scoreA        Int?
+  scoreB        Int?
+  format        String?
+  status        String?
+  court         String?
+  sourceUrl     String?
+  rawText       String?    @db.Text
+  createdAt     DateTime   @default(now())
+
+  @@index([tournamentId])
+  @@index([matchDate])
+}
+
+model TeamMapping {
+  id             String   @id @default(cuid())
+  liquipediaName String   @unique
+  alias          String?
+  platformId     String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([liquipediaName])
+  @@index([platformId])
+}

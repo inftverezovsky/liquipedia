@@ -19,7 +19,7 @@ type SearchResponse = {
   results: SearchResult[];
 };
 
-export default function SearchTournament() {
+export default function SearchTournament({ disciplineSlug }: { disciplineSlug: string }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
   const [cacheHit, setCacheHit] = useState(false);
@@ -33,7 +33,7 @@ export default function SearchTournament() {
     setResults([]);
 
     try {
-      const response = await fetch("/api/dota2/search-tournament", {
+      const response = await fetch(`/api/${disciplineSlug}/search-tournament`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ query })
@@ -121,7 +121,12 @@ export default function SearchTournament() {
                   >
                     Открыть
                   </a>
-                  <LoadTournamentButton pageId={result.pageId} title={result.title} pageUrl={result.pageUrl} />
+                  <LoadTournamentButton
+                    pageId={result.pageId}
+                    title={result.title}
+                    pageUrl={result.pageUrl}
+                    disciplineSlug={disciplineSlug}
+                  />
                 </div>
               </div>
             </article>

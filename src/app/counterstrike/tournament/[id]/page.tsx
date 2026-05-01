@@ -5,6 +5,7 @@ import TeamMappingPanel from "@/components/TeamMappingPanel";
 import MatchList from "@/components/MatchList";
 import TournamentPlatformIdPanel from "@/components/TournamentPlatformIdPanel";
 import { prisma } from "@/lib/db";
+
 import { formatDateTime } from "@/lib/format";
 import { isPlaceholderTeam } from "@/lib/teams";
 
@@ -45,7 +46,7 @@ export default async function TournamentPage({ params }: { params: { id: string 
 
   const mappings = await prisma.teamMapping.findMany({
     where: { 
-      disciplineSlug: "dota2",
+      disciplineSlug: "counterstrike",
       liquipediaName: { in: [...teamNames] } 
     }
   });
@@ -67,7 +68,7 @@ export default async function TournamentPage({ params }: { params: { id: string 
       <section className="rounded-3xl bg-white p-8 shadow-soft ring-1 ring-slate-200">
         <div className="flex flex-col gap-6 md:flex-row md:items-start md:justify-between">
           <div>
-            <p className="text-sm font-bold uppercase tracking-widest text-slate-400">Dota 2</p>
+            <p className="text-sm font-bold uppercase tracking-widest text-slate-400">Counter-Strike</p>
             <h1 className="mt-2 text-4xl font-extrabold tracking-tight text-slate-950">{tournament.name}</h1>
             <div className="mt-4 flex flex-wrap items-center gap-4">
               <StatusBadge status={tournament.extractionStatus} />
@@ -84,7 +85,7 @@ export default async function TournamentPage({ params }: { params: { id: string 
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
-            <LoadTournamentButton pageId={tournament.sourcePageId} title={tournament.sourceTitle} pageUrl={tournament.sourceUrl} disciplineSlug="dota2" />
+            <LoadTournamentButton pageId={tournament.sourcePageId} title={tournament.sourceTitle} pageUrl={tournament.sourceUrl} disciplineSlug="counterstrike" />
           </div>
         </div>
       </section>
@@ -99,7 +100,7 @@ export default async function TournamentPage({ params }: { params: { id: string 
                 {tournament.matches.length}
               </span>
             </div>
-            <MatchList matches={tournament.matches} mappings={mappingMap} disciplineSlug="dota2" />
+            <MatchList matches={tournament.matches} mappings={mappingMap} disciplineSlug="counterstrike" />
           </section>
         </div>
 
@@ -107,15 +108,15 @@ export default async function TournamentPage({ params }: { params: { id: string 
           {/* Platform Settings */}
           <section className="rounded-3xl bg-white p-6 shadow-soft ring-1 ring-slate-200">
             <h2 className="text-lg font-bold text-slate-950 mb-4">Настройки платформы</h2>
-            <TournamentPlatformIdPanel tournamentId={tournament.id} initialPlatformId={tournament.platformId} disciplineSlug="dota2" />
+            <TournamentPlatformIdPanel tournamentId={tournament.id} initialPlatformId={tournament.platformId} disciplineSlug="counterstrike" />
           </section>
 
           {/* Export */}
           <section className="rounded-3xl bg-slate-50 p-6 ring-1 ring-slate-200">
             <h2 className="text-sm font-bold uppercase tracking-wider text-slate-500 mb-4">Экспорт данных</h2>
             <div className="grid grid-cols-2 gap-2">
-              <a className="flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-bold text-slate-700 hover:bg-slate-50 transition" href={`/api/dota2/tournament/${tournament.id}/export?format=json`}>JSON</a>
-              <a className="flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-bold text-slate-700 hover:bg-slate-50 transition" href={`/api/dota2/tournament/${tournament.id}/export?format=csv&type=matches`}>CSV</a>
+              <a className="flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-bold text-slate-700 hover:bg-slate-50 transition" href={`/api/counterstrike/tournament/${tournament.id}/export?format=json`}>JSON</a>
+              <a className="flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-bold text-slate-700 hover:bg-slate-50 transition" href={`/api/counterstrike/tournament/${tournament.id}/export?format=csv&type=matches`}>CSV</a>
             </div>
           </section>
         </div>
@@ -134,7 +135,7 @@ export default async function TournamentPage({ params }: { params: { id: string 
             </div>
           </summary>
           <div className="mt-8 border-t border-slate-100 pt-8">
-            <TeamMappingPanel teamNames={[...teamNames]} initialMappings={mappings} disciplineSlug="dota2" />
+            <TeamMappingPanel teamNames={[...teamNames]} initialMappings={mappings} disciplineSlug="counterstrike" />
           </div>
         </details>
       </section>

@@ -2,7 +2,8 @@ import { fetchPageWikitext } from "../src/lib/liquipedia/client";
 import { extractFirstTemplateByPrefix, parseTemplate } from "../src/lib/normalizers/wikiText";
 
 async function main() {
-  const page = await fetchPageWikitext({ title: "The International/2023" });
+  const dota2Api = "https://liquipedia.net/dota2/api.php";
+  const page = await fetchPageWikitext(dota2Api, "dota2", { title: "The International/2023" });
   const infobox = extractFirstTemplateByPrefix(page.wikitext, "Infobox");
   console.log("Infobox template found:", !!infobox);
   if (infobox) {

@@ -10,6 +10,7 @@ export const metadata: Metadata = {
 const navItems = [
   { href: "/", label: "Главная" },
   { href: "/dota2", label: "Dota 2" },
+  { href: "/counterstrike", label: "Counter-Strike" },
   { href: "/history", label: "История загрузок" },
   { href: "/settings", label: "Настройки API" }
 ];

@@ -38,23 +38,41 @@
 - Автообход всех чемпионатов.
 - HTML scraping.
 
-## Быстрый запуск
+## Локальный запуск через Docker
+
+Для запуска всего проекта одной командой (база + приложение):
 
 ```bash
-cp .env.example .env
-docker compose up -d
-npm install
-npm run prisma:generate
-npm run db:push
-npm run db:seed
-npm run dev
+docker compose down
+docker compose up -d --build
 ```
 
-Открой:
+### Проверка
+```bash
+docker compose ps
+docker logs liquipedia-web --tail 100
+```
 
+### Открыть в браузере
 ```text
-http://localhost:3000
+http://localhost:3010
 ```
+
+*Примечание: Onyx может продолжать работать на порту 3000, конфликтов не будет.*
+
+## Деплой на Railway
+
+Проект готов к деплою на [Railway](https://railway.app/).
+
+### Шаги для деплоя:
+1. Создайте новый проект в Railway.
+2. Добавьте сервис **Database -> Add PostgreSQL**.
+3. Добавьте сервис **GitHub Repo** (подключите этот репозиторий).
+4. Railway автоматически обнаружит `Dockerfile` и `railway.json`.
+5. В настройках **Variables** сервиса `web` убедитесь, что `DATABASE_URL` подтянулся автоматически (или пропишите его вручную из настроек PostgreSQL).
+6. Добавьте переменную `LIQUIPEDIA_USER_AGENT`.
+
+Проект сам выполнит `prisma db push` и `prisma db seed` при каждом деплое.
 
 ## Обязательно поправить `.env`
 

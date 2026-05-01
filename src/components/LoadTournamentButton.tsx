@@ -6,11 +6,13 @@ import { useState } from "react";
 export default function LoadTournamentButton({
   pageId,
   title,
-  pageUrl
+  pageUrl,
+  disciplineSlug
 }: {
   pageId?: number | null;
   title: string;
   pageUrl?: string | null;
+  disciplineSlug: string;
 }) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
@@ -21,7 +23,7 @@ export default function LoadTournamentButton({
     setError(null);
 
     try {
-      const response = await fetch("/api/dota2/import-tournament", {
+      const response = await fetch(`/api/${disciplineSlug}/import-tournament`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ pageId, title, pageUrl })
@@ -33,7 +35,7 @@ export default function LoadTournamentButton({
         throw new Error(data.error ?? "Не удалось загрузить турнир");
       }
 
-      router.push(`/dota2/tournament/${data.tournament.id}`);
+      router.push(`/${disciplineSlug}/tournament/${data.tournament.id}`);
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Неизвестная ошибка");

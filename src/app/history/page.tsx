@@ -3,6 +3,8 @@ import StatusBadge from "@/components/StatusBadge";
 import { prisma } from "@/lib/db";
 import { formatDateTime } from "@/lib/format";
 
+export const dynamic = "force-dynamic";
+
 export default async function HistoryPage() {
   const imports = await prisma.tournamentImport.findMany({
     orderBy: { startedAt: "desc" },
@@ -34,7 +36,7 @@ export default async function HistoryPage() {
                   <tr key={item.id}>
                     <td className="border-b border-slate-100 py-3 pr-4 font-medium text-slate-950">
                       {item.tournament ? (
-                        <Link className="underline underline-offset-4" href={`/dota2/tournament/${item.tournament.id}`}>
+                        <Link className="underline underline-offset-4" href={`/${item.tournament.disciplineSlug}/tournament/${item.tournament.id}`}>
                           {item.pageTitle}
                         </Link>
                       ) : (
@@ -54,7 +56,7 @@ export default async function HistoryPage() {
             </table>
           </div>
         ) : (
-          <p className="text-sm text-slate-500">Пока нет загрузок. Зайди в Dota 2 и загрузи первый чемпионат.</p>
+          <p className="text-sm text-slate-500">Пока нет загрузок. Выберите дисциплину и загрузите первый чемпионат.</p>
         )}
       </section>
     </div>

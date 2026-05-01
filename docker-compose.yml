@@ -1,16 +1,32 @@
+version: '3.8'
+
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:16
     container_name: liquipedia-postgres
-    restart: unless-stopped
+    restart: always
     environment:
       POSTGRES_USER: liquipedia
       POSTGRES_PASSWORD: liquipedia
       POSTGRES_DB: liquipedia
     ports:
-      - "5434:5432"
+      - "5435:5432"
     volumes:
-      - liquipedia-postgres-data:/var/lib/postgresql/data
+      - liquipedia_postgres_data:/var/lib/postgresql/data
+
+  web:
+    build: .
+    container_name: liquipedia-web
+    restart: always
+    ports:
+      - "3010:3010"
+    environment:
+      DATABASE_URL: postgresql://liquipedia:liquipedia@postgres:5432/liquipedia?schema=public
+      LIQUIPEDIA_USER_AGENT: "liquipedia-local-docker/0.1 (local development; contact@example.com)"
+      PORT: 3010
+      # Optional: you can override other env vars here if needed
+    depends_on:
+      - postgres
 
 volumes:
-  liquipedia-postgres-data:
+  liquipedia_postgres_data:

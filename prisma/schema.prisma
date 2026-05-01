@@ -133,6 +133,7 @@ model TournamentParticipant {
   seed         String?
   region       String?
   status       String?
+  logoUrl      String?
   rawText      String?    @db.Text
   createdAt    DateTime   @default(now())
 
@@ -159,6 +160,7 @@ model TournamentMatch {
   status        String?
   court         String?
   sourceUrl     String?
+  syncedAt      DateTime?
   rawText       String?    @db.Text
   createdAt     DateTime   @default(now())
 
@@ -166,14 +168,22 @@ model TournamentMatch {
   @@index([matchDate])
 }
 
+model GlobalSettings {
+  key   String @id
+  value String @db.Text
+}
+
 model TeamMapping {
   id             String   @id @default(cuid())
-  liquipediaName String   @unique
+  disciplineSlug String   @default("counterstrike")
+  liquipediaName String
   alias          String?
   platformId     String?
+  logoUrl        String?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
+  @@unique([disciplineSlug, liquipediaName])
   @@index([liquipediaName])
   @@index([platformId])
 }

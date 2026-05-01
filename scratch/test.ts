@@ -15,7 +15,8 @@ async function main() {
     console.log(`\n============================`);
     console.log(`Testing query: ${query}`);
     try {
-      const results = await searchTournamentPages(query, 1);
+      const dota2Api = "https://liquipedia.net/dota2/api.php";
+      const results = await searchTournamentPages(query, dota2Api, "dota2", 1);
       if (results.length === 0) {
         console.log(`No results for ${query}`);
         continue;
@@ -24,7 +25,7 @@ async function main() {
       const target = results[0];
       console.log(`Found: ${target.title} (${target.pageUrl})`);
       
-      const page = await fetchPageWikitext({ title: target.title });
+      const page = await fetchPageWikitext(dota2Api, "dota2", { title: target.title });
       console.log(`Wikitext fetched: ${page.wikitext.length} chars`);
       
       let normalized = normalizeDota2Tournament({
@@ -35,7 +36,7 @@ async function main() {
       
       if (normalized.warnings.some(w => w.includes("Infobox не найден"))) {
         console.log(`Infobox missing, fetching parsed HTML...`);
-        const parsedHtml = await fetchPageParsed(page.title);
+        const parsedHtml = await fetchPageParsed(dota2Api, page.title);
         console.log(`Parsed HTML fetched: ${parsedHtml.length} chars`);
         normalized = normalizeDota2Tournament({
           title: page.title,

@@ -64,7 +64,7 @@ export type NormalizedTournament = {
 
 /* ───── Main entry point ───── */
 
-export function normalizeDota2Tournament(input: {
+export function normalizeCounterStrikeTournament(input: {
   pageId?: number;
   title: string;
   pageUrl: string;
@@ -233,6 +233,7 @@ function extractMatchesFromParsedHtml(html: string, pageUrl: string): Normalized
   const $ = cheerio.load(html);
   const matches: NormalizedMatch[] = [];
 
+  // Find current section context by traversing headings
   function findSectionForElement(el: any): string {
     const $el = $(el);
     let current = $el.closest("div, section, table").prev();
@@ -252,21 +253,28 @@ function extractMatchesFromParsedHtml(html: string, pageUrl: string): Normalized
   // Priority: aria-label > link title > .name text
   function getFullTeamName(oppEl: any): string | null {
     const $opp = $(oppEl);
+    // 1. aria-label on the element itself
     const aria = $opp.attr("aria-label")?.trim();
     if (aria && aria !== "TBD") return aria;
+    // 2. aria-label on parent cell (matchlist structure)
     const parentAria = $opp.closest("[aria-label]").attr("aria-label")?.trim();
     if (parentAria && parentAria !== "TBD") return parentAria;
+    // 3. title attribute on any <a> link inside .name
     const linkTitle = $opp.find(".name a").attr("title")?.trim();
     if (linkTitle && !linkTitle.includes("Time") && !linkTitle.includes("(page does not exist)")) return linkTitle;
-    const teamLink = $opp.find("a[href*='/dota2/']").attr("title")?.trim();
+    // 4. title attribute on any team link
+    const teamLink = $opp.find("a[href*='/counterstrike/']").attr("title")?.trim();
     if (teamLink && !teamLink.includes("Time") && !teamLink.includes("(page does not exist)")) return teamLink;
+    // 5. Fallback to .name text
     const nameText = $opp.find(".name").text().trim();
     return nameText || null;
   }
 
-  // 1. Extract from matchlist matches (group stage)
+  // 1. Extract from matchlist matches (group stage — this is the primary format on Liquipedia CS)
+  // Actual structure: .brkts-matchlist-match contains pairs of .brkts-matchlist-opponent cells
   $(".brkts-matchlist-match").each((_, matchEl) => {
     const $match = $(matchEl);
+    // Each match has opponent cells with aria-label containing the full team name
     const oppCells = $match.find(".brkts-matchlist-opponent");
     if (oppCells.length < 2) return;
 
@@ -274,10 +282,12 @@ function extractMatchesFromParsedHtml(html: string, pageUrl: string): Normalized
     const teamBName = getFullTeamName(oppCells.eq(1));
     if (!teamAName && !teamBName) return;
 
+    // Scores are in .brkts-matchlist-score cells
     const scoreCells = $match.find(".brkts-matchlist-score");
     const scoreAText = scoreCells.eq(0).text().trim();
     const scoreBText = scoreCells.eq(1).text().trim();
 
+    // Timer / date
     const timer = $match.find(".timer-object").first();
     const timestamp = timer.attr("data-timestamp");
     const dateText = timer.text().trim() || null;
@@ -289,12 +299,14 @@ function extractMatchesFromParsedHtml(html: string, pageUrl: string): Normalized
       if (!isNaN(ts)) matchDate = new Date(ts * 1000);
     }
 
+    // Stage from the matchlist title
     const $matchlist = $match.closest(".brkts-matchlist");
     const matchlistTitle = $matchlist.find(".brkts-matchlist-title b").text().trim();
     const sectionHeader = $match.prevAll(".brkts-matchlist-header").first().text().trim();
     const stage = matchlistTitle || findSectionForElement(matchEl) || null;
     const round = sectionHeader || null;
 
+    // Determine winner
     const teamAWon = oppCells.eq(0).hasClass("brkts-matchlist-slot-winner");
     const teamBWon = oppCells.eq(1).hasClass("brkts-matchlist-slot-winner");
 
@@ -322,7 +334,7 @@ function extractMatchesFromParsedHtml(html: string, pageUrl: string): Normalized
     if (matches.length >= 500) return false;
   });
 
-  // 2. Extract from bracket matches (playoffs)
+  // 2. Extract from bracket matches (playoffs — .brkts-match with .brkts-opponent-entry)
   $(".brkts-match").each((_, matchEl) => {
     const $match = $(matchEl);
     const opponents = $match.find(".brkts-opponent-entry");
@@ -562,7 +574,7 @@ function createStableMatchId(input: {
 }
 
 // Keep backward compat
-export function generateTeamId(teamName: string, sourceSlug: string = "dota2"): string {
+export function generateTeamId(teamName: string, sourceSlug: string = "counterstrike"): string {
   return createStableTeamId(teamName);
 }
 
@@ -579,7 +591,7 @@ function extractParticipants(wikitext: string, html?: string): NormalizedPartici
       // Look for the main team link
       const $link = $el.find("a").filter((_, a) => {
         const href = $(a).attr("href") || "";
-        return href.includes("/dota2/") && !href.includes("Special:") && !href.includes("Category:");
+        return href.includes("/counterstrike/") && !href.includes("Special:") && !href.includes("Category:");
       }).first();
 
       const fullName = $link.attr("title")?.trim() || $link.text().trim();
@@ -655,7 +667,9 @@ function extractSubPages(html: string, pageUrl: string): string[] {
   // Look for Tabs (standard Liquipedia structure for multi-page tournaments)
   $(".tabs-static a, .nav-tabs a").each((_, el) => {
     const href = $(el).attr("href");
+    const text = $(el).text().trim();
     if (href && !href.startsWith("#") && !href.includes("action=edit")) {
+      // Only include links that look like sub-pages of the current tournament
       const fullUrl = href.startsWith("http") ? href : `https://liquipedia.net${href}`;
       if (fullUrl.startsWith(pageUrl) && fullUrl !== pageUrl && !fullUrl.includes("/Qualifier")) {
         subPages.push(fullUrl);

@@ -2,6 +2,10 @@ export function getLiquipediaDota2ApiUrl() {
   return process.env.LIQUIPEDIA_DOTA2_API_URL ?? "https://liquipedia.net/dota2/api.php";
 }
 
+export function getLiquipediaCounterStrikeApiUrl() {
+  return process.env.LIQUIPEDIA_COUNTERSTRIKE_API_URL ?? "https://liquipedia.net/counterstrike/api.php";
+}
+
 export function getLiquipediaUserAgent() {
   return process.env.LIQUIPEDIA_USER_AGENT ?? "liquipedia-local-dev/0.1 (contact: change-me@example.com)";
 }

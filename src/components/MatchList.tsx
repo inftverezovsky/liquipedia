@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from "react";
 import { isPlaceholderTeam } from "@/lib/teams";
+import { SyncMatchesButton } from "./SyncMatchesButton";
 
 type Match = {
   id: string;
@@ -15,9 +16,11 @@ type Match = {
   stage: string | null;
   round: string | null;
   status: string | null;
+  syncedAt: Date | string | null;
+  rawText: string | null;
 };
 
-type MappingInfo = { alias: string | null; platformId: string | null };
+type MappingInfo = { alias: string | null; platformId: string | null; logoUrl?: string | null };
 
 function getMatchTimestamp(match: Match): number | null {
   if (match.matchDate) {
@@ -29,10 +32,12 @@ function getMatchTimestamp(match: Match): number | null {
 
 export default function MatchList({
   matches,
-  mappings
+  mappings,
+  disciplineSlug
 }: {
   matches: Match[];
   mappings: Record<string, MappingInfo>;
+  disciplineSlug: string;
 }) {
   const [showAll, setShowAll] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -77,17 +82,7 @@ export default function MatchList({
     if (newIds.has(id)) newIds.delete(id);
     else newIds.add(id);
     setSelectedIds(newIds);
-    
-    // For communication with the "Pour" button
-    (window as any).selectedMatchIds = Array.from(newIds);
   }
-
-  // Expose to window for the "Pour" button in another component
-  useMemo(() => {
-    if (typeof window !== "undefined") {
-      (window as any).selectedMatchIds = Array.from(selectedIds);
-    }
-  }, [selectedIds]);
 
   function formatMoscowDate(match: Match): string {
     let d: Date | null = null;
@@ -110,6 +105,16 @@ export default function MatchList({
     return `${dd}.${mm}.${yyyy} ${hh}:${min}`;
   }
 
+  function isMatchReady(match: Match): boolean {
+    const isTbdA = !match.teamAName || isPlaceholderTeam(match.teamAName);
+    const isTbdB = !match.teamBName || isPlaceholderTeam(match.teamBName);
+    
+    const pidA = isTbdA ? "tbd" : mappings[match.teamAName!]?.platformId;
+    const pidB = isTbdB ? "tbd" : mappings[match.teamBName!]?.platformId;
+    
+    return !!(pidA && pidB);
+  }
+
   function teamLabel(name: string | null): React.ReactNode {
     const isTbd = !name || isPlaceholderTeam(name);
     const effectiveName = isTbd ? "TBD" : name;
@@ -117,87 +122,124 @@ export default function MatchList({
     const alias = m?.alias || "—";
     const pid = m?.platformId || "";
 
-    if (isTbd && !pid) return "TBD (—) (ID —)";
-    
     return (
-      <>
-        {effectiveName} ({alias}) (ID {pid ? (
-          <span className="text-blue-600 font-bold">{pid}</span>
-        ) : (
-          <span className="text-red-500 font-bold">ОТСУТСТВУЕТ</span>
-        )})
-      </>
+      <span className="truncate">
+        {effectiveName} <span className="text-slate-400 font-normal">({alias})</span> <span className={`font-bold ${pid ? "text-blue-600" : "text-red-500"}`}>{pid || "NO ID"}</span>
+      </span>
     );
   }
 
   return (
     <div className="mt-4">
-      <div className="mb-3 flex items-center justify-between">
-        <div className="flex items-center gap-3">
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-6 border-b border-slate-100 pb-6">
+        <div className="flex items-center gap-2">
           {pastCount > 0 && (
             <button
               onClick={() => setShowAll(!showAll)}
-              className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
-                showAll ? "bg-slate-200 text-slate-700" : "bg-blue-600 text-white"
+              className={`rounded-xl px-4 py-2 text-sm font-semibold transition-all ${
+                showAll ? "bg-slate-200 text-slate-700" : "bg-slate-950 text-white"
               }`}
             >
-              {showAll ? "Скрыть прошедшие" : `Показать все (+ ${pastCount} прошедших)`}
+              {showAll ? "Скрыть прошедшие" : `Показать все (+${pastCount})`}
             </button>
           )}
-          <span className="text-sm text-slate-500">
-            {showAll ? `Все: ${matches.length}` : `Предстоящие: ${upcomingMatches.length}`}
+          <span className="text-xs font-medium text-slate-500 bg-slate-100 px-3 py-2 rounded-xl">
+            {showAll ? `Всего: ${matches.length}` : `Предстоящие: ${upcomingMatches.length}`}
           </span>
         </div>
-        
+
+        <SyncMatchesButton 
+          selectedIds={Array.from(selectedIds)} 
+          disciplineSlug={disciplineSlug} 
+          onSuccess={() => window.location.reload()}
+        />
+      </div>
+
+      <div className="mb-4 flex items-center justify-between">
         {displayMatches.length > 0 && (
-          <label className="flex items-center gap-2 cursor-pointer text-sm font-medium text-slate-700 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200">
+          <label className="flex items-center gap-2 cursor-pointer text-sm font-semibold text-slate-700 bg-slate-50 px-4 py-2 rounded-xl border border-slate-200 hover:bg-slate-100 transition">
             <input
               type="checkbox"
               checked={allSelected}
               onChange={toggleAll}
-              className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+              className="h-4 w-4 rounded-md border-slate-300 text-slate-900 focus:ring-slate-900"
             />
-            Выбрать все
+            Выбрать все на странице
           </label>
         )}
       </div>
 
       {displayMatches.length === 0 ? (
-        <p className="text-sm text-slate-500">
-          Нет предстоящих матчей.{" "}
-          <button onClick={() => setShowAll(true)} className="text-blue-600 underline">
-            Показать прошедшие ({pastCount})
+        <div className="rounded-2xl border-2 border-dashed border-slate-200 p-8 text-center">
+          <p className="text-sm text-slate-500">
+            Предстоящих матчей не найдено.
+          </p>
+          <button onClick={() => setShowAll(true)} className="mt-2 text-sm font-semibold text-slate-950 underline">
+            Показать архив ({pastCount})
           </button>
-        </p>
+        </div>
       ) : (
-        <div className="space-y-1 font-mono text-sm">
+        <div className="grid gap-2">
           {displayMatches.map((match) => {
             const ts = getMatchTimestamp(match);
             const isPast = ts ? ts <= now : false;
+            const isConflict = match.rawText?.includes("CONFLICT");
+            const isReady = isMatchReady(match);
+            const isSynced = !!match.syncedAt;
+            
             return (
               <div
                 key={match.id}
-                className={`flex items-center gap-2 rounded-lg px-3 py-2 hover:bg-slate-50 ${
-                  isPast ? "opacity-50" : ""
-                }`}
+                className={`group flex items-center gap-4 rounded-2xl border border-slate-200 bg-white p-4 transition-all hover:shadow-soft ${
+                  isPast ? "opacity-60" : ""
+                } ${isConflict ? "ring-2 ring-orange-400 border-transparent" : ""} ${isSynced ? "bg-slate-50/50" : ""}`}
               >
-                <div className="flex-1 flex items-start gap-2 min-w-0">
-                  <span className="shrink-0 text-slate-400 text-xs w-[100px]" title={match.matchId}>
-                    {match.matchId.slice(0, 12)}
-                  </span>
-                  <span className="shrink-0 text-slate-500 w-[130px]">{formatMoscowDate(match)}</span>
-                  <span className="font-semibold text-slate-900 truncate">{teamLabel(match.teamAName)}</span>
-                  <span className="text-slate-400 mx-1">-</span>
-                  <span className="font-semibold text-slate-900 truncate">{teamLabel(match.teamBName)}</span>
+                <div className="flex flex-1 items-center gap-4 min-w-0">
+                  <div className="flex flex-col shrink-0 w-[110px]">
+                    <div className="flex items-center gap-1.5 mb-0.5">
+                      {isReady ? (
+                        <div className="h-1.5 w-1.5 rounded-full bg-green-500" title="Готов к синхронизации" />
+                      ) : (
+                        <div className="h-1.5 w-1.5 rounded-full bg-red-400" title="Нет ID команд" />
+                      )}
+                      {isSynced && (
+                        <span className="text-[9px] font-black text-blue-600 uppercase tracking-tighter bg-blue-50 px-1 rounded">Synced</span>
+                      )}
+                    </div>
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tight">
+                      {match.matchId.slice(0, 12)}
+                    </span>
+                    <span className="text-xs font-semibold text-slate-900">{formatMoscowDate(match)}</span>
+                  </div>
+                  
+                  <div className="flex flex-1 items-center gap-2 min-w-0">
+                    <div className="flex-1 min-w-0 font-semibold">{teamLabel(match.teamAName)}</div>
+                    <div className="shrink-0 text-slate-300 text-xs px-2">VS</div>
+                    <div className="flex-1 min-w-0 font-semibold">{teamLabel(match.teamBName)}</div>
+                  </div>
+
                   {(match.scoreA != null || match.scoreB != null) && (
-                    <span className="ml-2 text-slate-500 whitespace-nowrap">({match.scoreA ?? "—"}:{match.scoreB ?? "—"})</span>
+                    <div className={`shrink-0 rounded-lg px-3 py-1 text-sm font-bold ${isConflict ? "bg-orange-100 text-orange-700" : "bg-slate-100 text-slate-700"}`}>
+                      {match.scoreA ?? "—"}:{match.scoreB ?? "—"}
+                    </div>
+                  )}
+                  
+                  {isConflict && (
+                    <div className="shrink-0" title="Данные на Liquipedia изменились!">
+                      <span className="flex h-6 w-6 items-center justify-center rounded-full bg-orange-100 text-orange-600">
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                        </svg>
+                      </span>
+                    </div>
                   )}
                 </div>
+
                 <input
                   type="checkbox"
                   checked={selectedIds.has(match.id)}
                   onChange={() => toggleOne(match.id)}
-                  className="h-4 w-4 shrink-0 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                  className="h-5 w-5 shrink-0 rounded-lg border-slate-300 text-slate-900 focus:ring-slate-900 transition-all group-hover:scale-110"
                 />
               </div>
             );
@@ -207,3 +249,4 @@ export default function MatchList({
     </div>
   );
 }
+

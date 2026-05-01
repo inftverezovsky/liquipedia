@@ -45,48 +45,144 @@ type PageApiResponse = {
   };
 };
 
-export async function searchTournamentPages(query: string, limit = 10): Promise<LiquipediaSearchResult[]> {
-  const response = await apiRequest<SearchApiResponse>({
-    action: "opensearch",
-    format: "json",
-    search: query,
-    limit: String(limit)
-  });
+export async function searchTournamentPages(query: string, apiUrl: string, disciplineSlug: string, limit = 10): Promise<LiquipediaSearchResult[]> {
+  const currentYear = new Date().getFullYear();
+  const variations = [query];
+  if (query.includes(" ")) {
+    variations.push(query.replace(/ /g, "/"));
+  }
+  // Add year variations for better coverage of recent/upcoming tournaments
+  if (query.length >= 3 && !query.match(/\d{4}/)) {
+    variations.push(`${query} ${currentYear}`);
+    variations.push(`${query} ${currentYear + 1}`);
+  }
 
-  let titles = response[1] ?? [];
-  const urls = response[3] ?? [];
+  const allTitlesSet = new Set<string>();
+  const titleToUrl = new Map<string, string>();
 
-  if (titles.length > 0) {
+  for (const v of variations) {
     try {
-      const infoResponse = await apiRequest<PageApiResponse>({
-        action: "query",
+      // 1. Prefix search (Opensearch)
+      const openResponse = await apiRequest<SearchApiResponse>(apiUrl, {
+        action: "opensearch",
         format: "json",
-        formatversion: "2",
-        prop: "revisions",
-        rvprop: "content",
-        rvslots: "main",
-        titles: titles.join("|"),
-        redirects: "1"
+        search: v,
+        limit: "100"
+      });
+      const openTitles = openResponse[1] ?? [];
+      const openUrls = openResponse[3] ?? [];
+      openTitles.forEach((t, i) => {
+        allTitlesSet.add(t);
+        if (openUrls[i]) titleToUrl.set(t, openUrls[i]);
       });
 
-      const pages = infoResponse.query?.pages || [];
-      const now = Date.now() - 24 * 60 * 60 * 1000; // 1 day buffer
+      // 2. Full-text search (list=search)
+      const searchResponse = await apiRequest<{ query?: { search?: Array<{ title: string }> } }>(apiUrl, {
+        action: "query",
+        list: "search",
+        srsearch: v,
+        srlimit: "100",
+        format: "json"
+      });
+      const searchTitles = searchResponse.query?.search?.map(s => s.title) ?? [];
+      searchTitles.forEach(t => allTitlesSet.add(t));
+    } catch (err) {
+      console.error(`Search variation "${v}" failed:`, err);
+    }
+  }
+
+  const allTitles = Array.from(allTitlesSet);
+  if (allTitles.length > 0) {
+    try {
+      // Process in chunks to avoid URL length limits
+      const chunkSize = 40;
+      const pages: any[] = [];
+      const normalizedMap = new Map<string, string>();
+      const redirectsMap = new Map<string, string>();
+
+      for (let i = 0; i < allTitles.length; i += chunkSize) {
+        const chunk = allTitles.slice(i, i + chunkSize);
+        const infoResponse = await apiRequest<PageApiResponse>(apiUrl, {
+          action: "query",
+          format: "json",
+          formatversion: "2",
+          prop: "revisions",
+          rvprop: "content",
+          rvslots: "main",
+          titles: chunk.join("|"),
+          redirects: "1"
+        });
+        if (infoResponse.query?.pages) pages.push(...infoResponse.query.pages);
+        if (infoResponse.query?.normalized) {
+          infoResponse.query.normalized.forEach(n => normalizedMap.set(n.to, n.from));
+        }
+        if (infoResponse.query?.redirects) {
+          infoResponse.query.redirects.forEach(r => redirectsMap.set(r.to, r.from));
+        }
+      }
+      const now = Date.now();
+      const pastLimit = now - 2 * 24 * 60 * 60 * 1000;
+      const futureLimit = now + 30 * 24 * 60 * 60 * 1000;
       const activeResults = new Map<string, { title: string, dates: string | null }>();
+      
+      // Clean wiki markup from date strings
+      const cleanDate = (val: string) => {
+        let cleaned = val
+          .replace(/\{\{[^}]*\}\}/g, '')        // Remove all templates like {{date|...}}
+          .replace(/\[\[[^\]]*\]\]/g, '')         // Remove wiki links
+          .replace(/<[^>]*>/g, '')                // Remove HTML tags
+          .replace(/\}\}.*$/s, '')                // Remove trailing }} and everything after
+          .trim();
+        // Extract just the date portion (YYYY-MM-DD)
+        const dateMatch = cleaned.match(/(\d{4}-\d{2}-\d{2})/);
+        return dateMatch ? dateMatch[1] : cleaned;
+      };
 
       for (const p of pages) {
         const wikitext = p.revisions?.[0]?.slots?.main?.content;
-        const enddateMatch = wikitext?.match(/\|\s*(?:edate|enddate|end_date|date2|date_end)\s*=\s*([^|\n]+)/i)?.[1]?.trim();
-        const startdateMatch = wikitext?.match(/\|\s*(?:sdate|startdate|start_date|date|date_start)\s*=\s*([^|\n]+)/i)?.[1]?.trim();
+        if (!wikitext) continue;
+
+        // STRICT: Only show tournament pages (must have tournament/league infobox)
+        const isTournament = /\{\{\s*(?:Infobox\s+league|Infobox\s+tournament|LeagueInfobox|TournamentInfobox)/i.test(wikitext);
+        if (!isTournament) continue;
+
+        const enddateRaw = wikitext.match(/\|\s*(?:edate|enddate|end_date|date2|date_end)\s*=\s*([^|\n]*(?:\{\{[^}]*\}\}[^|\n]*)*)/i)?.[1]?.trim();
+        const startdateRaw = wikitext.match(/\|\s*(?:sdate|startdate|start_date|date1|date_start)\s*=\s*([^|\n]*(?:\{\{[^}]*\}\}[^|\n]*)*)/i)?.[1]?.trim();
         
-        let isPast = false;
+        const enddateMatch = enddateRaw ? cleanDate(enddateRaw) : null;
+        const startdateMatch = startdateRaw ? cleanDate(startdateRaw) : null;
+
+        let shouldHide = false;
+        
+        // 1. If we have an end date, it must be recent (within 2 days)
         if (enddateMatch) {
           const endDate = new Date(enddateMatch);
-          if (!isNaN(endDate.getTime()) && endDate.getTime() < now) {
-            isPast = true;
+          if (!isNaN(endDate.getTime()) && endDate.getTime() < pastLimit) {
+            shouldHide = true;
+          }
+        } 
+        // 2. If no end date, the start date must be recent
+        else if (startdateMatch) {
+          const startDate = new Date(startdateMatch);
+          if (!isNaN(startDate.getTime()) && startDate.getTime() < pastLimit) {
+            shouldHide = true;
           }
         }
-        
-        if (!isPast) {
+
+        // 3. Must not be too far in the future
+        if (startdateMatch && !shouldHide) {
+          const startDate = new Date(startdateMatch);
+          if (!isNaN(startDate.getTime()) && startDate.getTime() > futureLimit) {
+            shouldHide = true;
+          }
+        }
+
+        // 4. Hide if no dates found at all
+        if (!startdateMatch && !enddateMatch) {
+          shouldHide = true;
+        }
+
+        if (!shouldHide) {
           let datesStr = null;
           if (startdateMatch || enddateMatch) {
             datesStr = [startdateMatch, enddateMatch].filter(Boolean).join(" — ");
@@ -95,55 +191,54 @@ export async function searchTournamentPages(query: string, limit = 10): Promise<
         }
       }
 
-      // Also map via normalized titles if API did normalization
-      if (infoResponse.query?.normalized) {
-        for (const norm of infoResponse.query.normalized) {
-          const info = activeResults.get(norm.to);
-          if (info) activeResults.set(norm.from, info);
-        }
+      // Also map via normalized titles and redirects
+      for (const [to, from] of normalizedMap) {
+        const info = activeResults.get(to);
+        if (info) activeResults.set(from, info);
       }
-      if (infoResponse.query?.redirects) {
-        for (const redir of infoResponse.query.redirects) {
-          const info = activeResults.get(redir.to);
-          if (info) activeResults.set(redir.from, info);
-        }
+      for (const [to, from] of redirectsMap) {
+        const info = activeResults.get(to);
+        if (info) activeResults.set(from, info);
       }
 
       const results: LiquipediaSearchResult[] = [];
-      for (let i = 0; i < titles.length; i++) {
-        const titleSpace = titles[i].replace(/_/g, " ");
-        const activeInfo = activeResults.get(titleSpace) || activeResults.get(titles[i]);
+      const yearRegex = new RegExp(`${currentYear}|${currentYear + 1}`);
+
+      for (let i = 0; i < allTitles.length; i++) {
+        const title = allTitles[i];
+        const titleSpace = title.replace(/_/g, " ");
+        const activeInfo = activeResults.get(titleSpace) || activeResults.get(title);
+        
         if (activeInfo) {
+          // Boost score if title contains current or next year
+          let score = allTitles.length - i;
+          if (yearRegex.test(title)) score += 1000;
+
           results.push({
             pageId: 0,
-            title: titles[i],
-            pageUrl: urls[i] ?? makeLiquipediaPageUrl(titles[i]),
+            title: title,
+            pageUrl: titleToUrl.get(title) ?? makeLiquipediaPageUrl(title, disciplineSlug),
             snippet: "",
-            score: limit - i,
+            score: score,
             wordCount: null,
             dates: activeInfo.dates
           });
         }
       }
 
-      return results;
+      // Final sort by score
+      results.sort((a, b) => (b.score || 0) - (a.score || 0));
+
+      return results.slice(0, limit);
     } catch (err) {
-      console.error("Failed to filter finished tournaments:", err);
-      // fallback to unfiltered if the query fails
+      console.error("Failed to filter search results:", err);
     }
   }
 
-  return titles.map((title, index) => ({
-    pageId: 0,
-    title,
-    pageUrl: urls[index] ?? makeLiquipediaPageUrl(title),
-    snippet: "",
-    score: limit - index,
-    wordCount: null
-  }));
+  return [];
 }
 
-export async function fetchPageWikitext(input: { pageId?: number; title?: string }): Promise<LiquipediaPageContent> {
+export async function fetchPageWikitext(apiUrl: string, disciplineSlug: string, input: { pageId?: number; title?: string }): Promise<LiquipediaPageContent> {
   const params: Record<string, string> = {
     action: "query",
     format: "json",
@@ -163,7 +258,7 @@ export async function fetchPageWikitext(input: { pageId?: number; title?: string
     throw new Error("fetchPageWikitext requires pageId or title");
   }
 
-  const response = await apiRequest<PageApiResponse>(params);
+  const response = await apiRequest<PageApiResponse>(apiUrl, params);
   const page = response.query?.pages?.[0];
 
   if (!page || page.missing) {
@@ -180,19 +275,20 @@ export async function fetchPageWikitext(input: { pageId?: number; title?: string
   return {
     pageId: page.pageid,
     title: page.title,
-    fullUrl: page.fullurl ?? makeLiquipediaPageUrl(page.title),
+    fullUrl: page.fullurl ?? makeLiquipediaPageUrl(page.title, disciplineSlug),
     wikitext,
     raw: response
   };
 }
 
-export function makeLiquipediaPageUrl(title: string) {
+export function makeLiquipediaPageUrl(title: string, disciplineSlug: string) {
   const normalized = title.trim().replace(/ /g, "_");
-  return `https://liquipedia.net/dota2/${encodeURIComponent(normalized).replace(/%2F/g, "/")}`;
+  return `https://liquipedia.net/${disciplineSlug}/${encodeURIComponent(normalized).replace(/%2F/g, "/")}`;
 }
 
-export async function fetchPageParsed(title: string): Promise<string> {
+export async function fetchPageParsed(apiUrl: string, title: string): Promise<string> {
   const response = await apiRequest<{ parse?: { text?: { "*"?: string } } }>(
+    apiUrl,
     {
       action: "parse",
       format: "json",
@@ -207,9 +303,9 @@ export async function fetchPageParsed(title: string): Promise<string> {
   return response.parse?.text?.["*"] ?? "";
 }
 
-async function apiRequest<T>(params: Record<string, string>, isParse = false): Promise<T> {
+export async function apiRequest<T>(apiUrl: string, params: Record<string, string>, isParse = false): Promise<T> {
   const execute = async () => {
-    const url = new URL(getLiquipediaDota2ApiUrl());
+    const url = new URL(apiUrl);
     for (const [key, value] of Object.entries(params)) {
       url.searchParams.set(key, value);
     }

@@ -7,22 +7,26 @@ type TeamMappingRecord = {
   liquipediaName: string;
   alias: string | null;
   platformId: string | null;
+  logoUrl?: string | null;
 };
 
 export default function TeamMappingPanel({
   teamNames,
-  initialMappings
+  initialMappings,
+  disciplineSlug
 }: {
   teamNames: string[];
   initialMappings: TeamMappingRecord[];
+  disciplineSlug: string;
 }) {
-  const [mappings, setMappings] = useState<Record<string, { alias: string; platformId: string; saved: boolean }>>(() => {
-    const map: Record<string, { alias: string; platformId: string; saved: boolean }> = {};
+  const [mappings, setMappings] = useState<Record<string, { alias: string; platformId: string; logoUrl: string; saved: boolean }>>(() => {
+    const map: Record<string, { alias: string; platformId: string; logoUrl: string; saved: boolean }> = {};
     for (const name of teamNames) {
       const existing = initialMappings.find((m) => m.liquipediaName === name);
       map[name] = {
         alias: existing?.alias ?? "",
         platformId: existing?.platformId ?? "",
+        logoUrl: existing?.logoUrl ?? "",
         saved: !!(existing?.alias || existing?.platformId)
       };
     }
@@ -40,8 +44,10 @@ export default function TeamMappingPanel({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           liquipediaName: name,
+          disciplineSlug,
           alias: entry.alias,
-          platformId: entry.platformId
+          platformId: entry.platformId,
+          logoUrl: entry.logoUrl || undefined
         })
       });
       setMappings((prev) => ({
@@ -59,12 +65,12 @@ export default function TeamMappingPanel({
     if (!confirm(`Удалить маппинг для "${name}"?`)) return;
     setSaving(name);
     try {
-      await fetch(`/api/team-mapping?name=${encodeURIComponent(name)}`, {
+      await fetch(`/api/team-mapping?name=${encodeURIComponent(name)}&discipline=${disciplineSlug}`, {
         method: "DELETE"
       });
       setMappings((prev) => ({
         ...prev,
-        [name]: { alias: "", platformId: "", saved: false }
+        [name]: { alias: "", platformId: "", logoUrl: "", saved: false }
       }));
     } catch (err) {
       console.error(err);
@@ -74,7 +80,7 @@ export default function TeamMappingPanel({
     }
   }
 
-  function handleChange(name: string, field: "alias" | "platformId", value: string) {
+  function handleChange(name: string, field: "alias" | "platformId" | "logoUrl", value: string) {
     setMappings((prev) => ({
       ...prev,
       [name]: { ...prev[name], [field]: value, saved: false }
@@ -86,61 +92,65 @@ export default function TeamMappingPanel({
   return (
     <div className="mt-4 overflow-x-auto">
       <table className="min-w-full text-left text-sm">
-        <thead className="text-slate-500">
+        <thead className="text-slate-500 text-[11px] font-bold uppercase tracking-wider">
           <tr>
-            <th className="border-b border-slate-200 py-2 pr-4">Liquipedia имя</th>
-            <th className="border-b border-slate-200 py-2 pr-4 w-[240px]">Каноническое / альт. имя</th>
-            <th className="border-b border-slate-200 py-2 pr-4 w-[160px]">Platform ID (ОБЯЗАТЕЛЬНО)</th>
-            <th className="border-b border-slate-200 py-2 pr-4 w-[220px]"></th>
+            <th className="border-b border-slate-200 py-3 pr-4">Team (Liquipedia)</th>
+            <th className="border-b border-slate-200 py-3 pr-4 w-[240px]">Каноническое / Альт. имя</th>
+            <th className="border-b border-slate-200 py-3 pr-4 w-[160px]">Platform ID</th>
+            <th className="border-b border-slate-200 py-3 pr-4 w-[220px]">Управление</th>
           </tr>
         </thead>
         <tbody>
           {sorted.map((name) => {
-            const entry = mappings[name] ?? { alias: "", platformId: "", saved: false };
+            const entry = mappings[name] ?? { alias: "", platformId: "", logoUrl: "", saved: false };
             const isSaving = saving === name;
             return (
-              <tr key={name}>
-                <td className="border-b border-slate-100 py-2 pr-4 font-medium text-slate-950">{name}</td>
-                <td className="border-b border-slate-100 py-2 pr-4">
+              <tr key={name} className="hover:bg-slate-50 transition-colors">
+                <td className="border-b border-slate-100 py-4 pr-4">
+                  <span className="font-semibold text-slate-950">{name}</span>
+                </td>
+                <td className="border-b border-slate-100 py-4 pr-4">
                   <input
                     type="text"
                     value={entry.alias}
                     onChange={(e) => handleChange(name, "alias", e.target.value)}
-                    placeholder="необязательно"
-                    className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                    placeholder="Team Vitality..."
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-950 focus:border-slate-950 focus:outline-none focus:ring-4 focus:ring-slate-100 transition"
                   />
                 </td>
-                <td className="border-b border-slate-100 py-2 pr-4">
+                <td className="border-b border-slate-100 py-4 pr-4">
                   <input
                     type="text"
                     value={entry.platformId}
                     onChange={(e) => handleChange(name, "platformId", e.target.value)}
-                    placeholder="ОБЯЗАТЕЛЬНО"
-                    className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                    placeholder="ID:123"
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-950 font-mono focus:border-slate-950 focus:outline-none focus:ring-4 focus:ring-slate-100 transition"
                   />
                 </td>
-                <td className="border-b border-slate-100 py-2 pr-4">
+                <td className="border-b border-slate-100 py-4 pr-4">
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => handleSave(name)}
                       disabled={isSaving || entry.saved}
-                      className={`min-w-[100px] rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
+                      className={`min-w-[110px] rounded-xl px-4 py-2 text-sm font-semibold transition-all ${
                         entry.saved
-                          ? "bg-green-50 text-green-600 border border-green-200"
+                          ? "bg-slate-100 text-slate-400 cursor-default"
                           : isSaving
                           ? "bg-slate-100 text-slate-400"
-                          : "bg-blue-600 text-white hover:bg-blue-700"
+                          : "bg-slate-950 text-white hover:bg-slate-800"
                       }`}
                     >
-                      {isSaving ? "..." : entry.saved ? "✓ Сохранено" : "Сохранить"}
+                      {isSaving ? "..." : entry.saved ? "✓ Ок" : "Применить"}
                     </button>
                     <button
                       onClick={() => handleDelete(name)}
                       disabled={isSaving}
-                      className="rounded-lg bg-red-50 px-3 py-1.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-100 disabled:opacity-50 border border-red-100"
-                      title="Удалить маппинг"
+                      className="rounded-xl p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 transition-all"
+                      title="Сбросить маппинг"
                     >
-                      Удалить
+                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
                     </button>
                   </div>
                 </td>

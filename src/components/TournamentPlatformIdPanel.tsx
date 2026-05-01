@@ -4,10 +4,12 @@ import { useState } from "react";
 
 export default function TournamentPlatformIdPanel({
   tournamentId,
-  initialPlatformId
+  initialPlatformId,
+  disciplineSlug
 }: {
   tournamentId: string;
   initialPlatformId: string | null;
+  disciplineSlug: string;
 }) {
   const [platformId, setPlatformId] = useState(initialPlatformId || "");
   const [saving, setSaving] = useState(false);
@@ -18,7 +20,7 @@ export default function TournamentPlatformIdPanel({
     setSaving(true);
     setSaved(false);
     try {
-      await fetch(`/api/dota2/tournament/${tournamentId}/platform-id`, {
+      await fetch(`/api/${disciplineSlug}/tournament/${tournamentId}/platform-id`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ platformId: platformId.trim() })
@@ -37,7 +39,7 @@ export default function TournamentPlatformIdPanel({
     if (!confirm("Удалить ID шапки турнира?")) return;
     setSaving(true);
     try {
-      await fetch(`/api/dota2/tournament/${tournamentId}/platform-id`, {
+      await fetch(`/api/${disciplineSlug}/tournament/${tournamentId}/platform-id`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ platformId: "" })

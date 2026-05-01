@@ -1,28 +1,24 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { getOrCreateDota2Discipline } from "@/lib/disciplines";
+import { getOrCreateCounterStrikeDiscipline } from "@/lib/disciplines";
 import { searchTournamentPages } from "@/lib/liquipedia/client";
 import { getSearchCacheTtlMs } from "@/lib/env";
 
 export const dynamic = "force-dynamic";
-
-type Body = {
-  query?: unknown;
-};
 
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => null);
     const query = typeof body?.query === "string" ? body.query.trim() : "";
 
-    console.log(`\n[Search API] Route called: /api/dota2/search-tournament`);
+    console.log(`\n[Search API] Route called: /api/counterstrike/search-tournament`);
     console.log(`[Search API] Query: "${query}"`);
 
     if (query.length < 2) {
       return NextResponse.json({ error: "Введите минимум 2 символа" }, { status: 400 });
     }
 
-    const discipline = await getOrCreateDota2Discipline();
+    const discipline = await getOrCreateCounterStrikeDiscipline();
     const cacheSince = new Date(Date.now() - getSearchCacheTtlMs());
 
     const cachedRequest = await prisma.searchRequest.findFirst({
@@ -71,8 +67,8 @@ export async function POST(req: Request) {
       });
     }
 
-    const apiUrl = discipline.baseApiUrl ?? "https://liquipedia.net/dota2/api.php";
-    const results = await searchTournamentPages(query, apiUrl, "dota2");
+    const apiUrl = discipline.baseApiUrl ?? "https://liquipedia.net/counterstrike/api.php";
+    const results = await searchTournamentPages(query, apiUrl, "counterstrike");
 
     await prisma.searchRequest.create({
       data: {

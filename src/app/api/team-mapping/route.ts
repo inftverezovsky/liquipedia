@@ -7,16 +7,21 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const names = searchParams.get("names");
+  const disciplineSlug = searchParams.get("discipline") || "counterstrike";
 
   if (names) {
     const nameList = names.split(",").map((n) => n.trim()).filter(Boolean);
     const mappings = await prisma.teamMapping.findMany({
-      where: { liquipediaName: { in: nameList } }
+      where: { 
+        disciplineSlug,
+        liquipediaName: { in: nameList } 
+      }
     });
     return NextResponse.json({ mappings });
   }
 
   const mappings = await prisma.teamMapping.findMany({
+    where: { disciplineSlug },
     orderBy: { liquipediaName: "asc" }
   });
   return NextResponse.json({ mappings });
@@ -25,26 +30,38 @@ export async function GET(request: Request) {
 // POST — создать или обновить маппинг
 export async function POST(request: Request) {
   const body = await request.json();
-  const { liquipediaName, alias, platformId } = body as {
+  const { liquipediaName, disciplineSlug, alias, platformId, logoUrl } = body as {
     liquipediaName?: string;
+    disciplineSlug?: string;
     alias?: string;
     platformId?: string;
+    logoUrl?: string;
   };
+
+  const slug = disciplineSlug || "counterstrike";
 
   if (!liquipediaName || liquipediaName.trim().length < 1) {
     return NextResponse.json({ error: "liquipediaName обязателен" }, { status: 400 });
   }
 
   const mapping = await prisma.teamMapping.upsert({
-    where: { liquipediaName: liquipediaName.trim() },
+    where: { 
+      disciplineSlug_liquipediaName: {
+        disciplineSlug: slug,
+        liquipediaName: liquipediaName.trim()
+      }
+    },
     update: {
       alias: alias?.trim() || null,
-      platformId: platformId?.trim() || null
+      platformId: platformId?.trim() || null,
+      logoUrl: logoUrl?.trim() || undefined
     },
     create: {
+      disciplineSlug: slug,
       liquipediaName: liquipediaName.trim(),
       alias: alias?.trim() || null,
-      platformId: platformId?.trim() || null
+      platformId: platformId?.trim() || null,
+      logoUrl: logoUrl?.trim() || null
     }
   });
 
@@ -54,13 +71,19 @@ export async function POST(request: Request) {
 export async function DELETE(request: Request) {
   const { searchParams } = new URL(request.url);
   const name = searchParams.get("name");
+  const disciplineSlug = searchParams.get("discipline") || "counterstrike";
 
   if (!name) {
     return NextResponse.json({ error: "Параметр name обязателен" }, { status: 400 });
   }
 
-  await prisma.teamMapping.deleteMany({
-    where: { liquipediaName: name.trim() }
+  await prisma.teamMapping.delete({
+    where: { 
+      disciplineSlug_liquipediaName: {
+        disciplineSlug,
+        liquipediaName: name.trim()
+      }
+    }
   });
 
   return NextResponse.json({ success: true });

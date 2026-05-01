@@ -6,7 +6,7 @@ export default function HomePage() {
       <section className="rounded-3xl bg-white p-8 shadow-soft ring-1 ring-slate-200">
         <p className="text-sm font-semibold uppercase tracking-wide text-slate-500">Manual API-first loader</p>
         <h1 className="mt-3 max-w-3xl text-4xl font-bold tracking-tight text-slate-950">
-          Стартовый проект liquipedia для ручной загрузки турниров Dota 2.
+          Стартовый проект liquipedia для ручной загрузки турниров.
         </h1>
         <p className="mt-4 max-w-3xl text-lg text-slate-600">
           Это не фоновый парсер и не crawler. Пользователь сам вводит примерное название чемпионата,
@@ -14,7 +14,10 @@ export default function HomePage() {
         </p>
         <div className="mt-6 flex flex-wrap gap-3">
           <Link href="/dota2" className="rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800">
-            Перейти в Dota 2
+            Dota 2
+          </Link>
+          <Link href="/counterstrike" className="rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800">
+            Counter-Strike
           </Link>
           <Link href="/settings" className="rounded-xl border border-slate-300 px-5 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50">
             Проверить настройки API

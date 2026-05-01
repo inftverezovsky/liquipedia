@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { getOrCreateDota2Discipline } from "@/lib/disciplines";
+import { getOrCreateCounterStrikeDiscipline } from "@/lib/disciplines";
 import { makeLiquipediaPageUrl } from "@/lib/liquipedia/client";
-import { normalizeDota2Tournament } from "@/lib/normalizers/dota2Tournament";
+import { normalizeCounterStrikeTournament } from "@/lib/normalizers/counterstrikeTournament";
 import { importTournamentRecursive } from "@/lib/liquipedia/importer";
 
 export const dynamic = "force-dynamic";
@@ -19,13 +19,13 @@ export async function POST(request: Request) {
   const title = typeof body.title === "string" ? body.title.trim() : "";
   const pageUrl = typeof body.pageUrl === "string" && body.pageUrl.trim().length > 0
     ? body.pageUrl.trim()
-    : makeLiquipediaPageUrl(title, "dota2");
+    : makeLiquipediaPageUrl(title, "counterstrike");
 
   if (!pageId && title.length < 2) {
     return NextResponse.json({ error: "Нужен pageId или title выбранной страницы" }, { status: 400 });
   }
 
-  const discipline = await getOrCreateDota2Discipline();
+  const discipline = await getOrCreateCounterStrikeDiscipline();
 
   const tournamentImport = await prisma.tournamentImport.create({
     data: {
@@ -38,16 +38,16 @@ export async function POST(request: Request) {
   });
 
   try {
-    const apiUrl = discipline.baseApiUrl ?? "https://liquipedia.net/dota2/api.php";
+    const apiUrl = discipline.baseApiUrl ?? "https://liquipedia.net/counterstrike/api.php";
     
     const { tournament, normalized } = await importTournamentRecursive({
       disciplineId: discipline.id,
-      disciplineSlug: "dota2",
+      disciplineSlug: "counterstrike",
       apiUrl,
       pageId,
       title,
       pageUrl,
-      normalizer: normalizeDota2Tournament,
+      normalizer: normalizeCounterStrikeTournament,
       importRecordId: tournamentImport.id
     });
 

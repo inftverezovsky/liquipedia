@@ -17,6 +17,21 @@ async function main() {
       isEnabled: true
     }
   });
+
+  await prisma.discipline.upsert({
+    where: { slug: "counterstrike" },
+    update: {
+      name: "Counter-Strike",
+      baseApiUrl: process.env.LIQUIPEDIA_COUNTERSTRIKE_API_URL ?? "https://liquipedia.net/counterstrike/api.php",
+      isEnabled: true
+    },
+    create: {
+      slug: "counterstrike",
+      name: "Counter-Strike",
+      baseApiUrl: process.env.LIQUIPEDIA_COUNTERSTRIKE_API_URL ?? "https://liquipedia.net/counterstrike/api.php",
+      isEnabled: true
+    }
+  });
 }
 
 main()

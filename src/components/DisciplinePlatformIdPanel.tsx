@@ -2,26 +2,26 @@
 
 import { useState, useEffect } from "react";
 
-export default function DisciplinePlatformIdPanel() {
+export default function DisciplinePlatformIdPanel({ disciplineSlug }: { disciplineSlug: string }) {
   const [platformId, setPlatformId] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    fetch("/api/disciplines/dota2/platform-id")
+    fetch(`/api/disciplines/${disciplineSlug}/platform-id`)
       .then(res => res.json())
       .then(data => {
         setPlatformId(data.platformId || "");
         setLoading(false);
       });
-  }, []);
+  }, [disciplineSlug]);
 
   async function handleSave() {
     setSaving(true);
     setSaved(false);
     try {
-      await fetch("/api/disciplines/dota2/platform-id", {
+      await fetch(`/api/disciplines/${disciplineSlug}/platform-id`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ platformId: platformId.trim() })
@@ -40,7 +40,7 @@ export default function DisciplinePlatformIdPanel() {
     if (!confirm("Удалить глобальный ID дисциплины?")) return;
     setSaving(true);
     try {
-      await fetch("/api/disciplines/dota2/platform-id", {
+      await fetch(`/api/disciplines/${disciplineSlug}/platform-id`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ platformId: "" })

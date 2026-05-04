@@ -65,6 +65,19 @@ export async function POST(request: Request) {
     }
   });
 
+  // Cascade update: find all tournaments for this discipline and update participants with this name
+  await prisma.tournamentParticipant.updateMany({
+    where: {
+      name: liquipediaName.trim(),
+      tournament: {
+        disciplineSlug: slug
+      }
+    },
+    data: {
+      platformId: platformId?.trim() || null
+    }
+  });
+
   return NextResponse.json({ mapping });
 }
 

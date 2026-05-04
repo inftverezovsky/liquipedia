@@ -121,7 +121,7 @@ export async function searchTournamentPages(query: string, apiUrl: string, disci
         }
       }
       const now = Date.now();
-      const pastLimit = now - 2 * 24 * 60 * 60 * 1000;
+      const pastLimit = now - 30 * 24 * 60 * 60 * 1000;
       const futureLimit = now + 30 * 24 * 60 * 60 * 1000;
       const activeResults = new Map<string, { title: string, dates: string | null }>();
       
@@ -154,7 +154,7 @@ export async function searchTournamentPages(query: string, apiUrl: string, disci
 
         let shouldHide = false;
         
-        // 1. If we have an end date, it must be recent (within 2 days)
+        // 1. If we have an end date, it must be recent (within 30 days)
         if (enddateMatch) {
           const endDate = new Date(enddateMatch);
           if (!isNaN(endDate.getTime()) && endDate.getTime() < pastLimit) {

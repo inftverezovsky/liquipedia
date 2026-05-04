@@ -33,6 +33,7 @@ export function ExternalPlatformSettings() {
         </h2>
         
         <div className="grid gap-6 md:grid-cols-3">
+          {/* ... existing URL and API Key inputs ... */}
           <div>
             <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
               URL Приемника (Webhook)
@@ -63,7 +64,7 @@ export function ExternalPlatformSettings() {
 
           <div>
             <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
-              Global Platform ID
+              Global Platform ID (Fallback)
             </label>
             <input
               type="text"
@@ -73,6 +74,27 @@ export function ExternalPlatformSettings() {
               onChange={(e) => setSettings(p => ({ ...p, external_platform_global_id: e.target.value }))}
               onBlur={(e) => saveSetting("external_platform_global_id", e.target.value)}
             />
+          </div>
+        </div>
+
+        <div className="mt-8 pt-8 border-t border-slate-100">
+          <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest mb-6">Привязка Дисциплин (Глобальные Шапки)</h3>
+          <div className="grid gap-6 md:grid-cols-4">
+            {["dota2", "counterstrike", "leagueoflegends", "valorant"].map(slug => (
+              <div key={slug}>
+                <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">
+                  {slug === "leagueoflegends" ? "LoL" : slug === "counterstrike" ? "CS" : slug.toUpperCase()} ID
+                </label>
+                <input
+                  type="text"
+                  placeholder="ID..."
+                  className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900 transition font-mono"
+                  value={settings[`discipline_id_${slug}`] || ""}
+                  onChange={(e) => setSettings(p => ({ ...p, [`discipline_id_${slug}`]: e.target.value }))}
+                  onBlur={(e) => saveSetting(`discipline_id_${slug}`, e.target.value)}
+                />
+              </div>
+            ))}
           </div>
         </div>
       </section>

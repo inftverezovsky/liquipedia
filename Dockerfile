@@ -15,7 +15,6 @@ RUN npx prisma generate
 COPY . .
 
 # Build the Next.js application
-ENV DATABASE_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder"
 RUN npm run build
 
 # Runtime stage

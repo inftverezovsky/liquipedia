@@ -6,6 +6,14 @@ export function getLiquipediaCounterStrikeApiUrl() {
   return process.env.LIQUIPEDIA_COUNTERSTRIKE_API_URL ?? "https://liquipedia.net/counterstrike/api.php";
 }
 
+export function getLiquipediaLolApiUrl() {
+  return process.env.LIQUIPEDIA_LOL_API_URL ?? "https://liquipedia.net/leagueoflegends/api.php";
+}
+
+export function getLiquipediaValorantApiUrl() {
+  return process.env.LIQUIPEDIA_VALORANT_API_URL ?? "https://liquipedia.net/valorant/api.php";
+}
+
 export function getLiquipediaUserAgent() {
   return process.env.LIQUIPEDIA_USER_AGENT ?? "liquipedia-local-dev/0.1 (contact: change-me@example.com)";
 }

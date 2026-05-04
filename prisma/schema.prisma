@@ -130,6 +130,7 @@ model TournamentParticipant {
   tournamentId String
   tournament   Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
   name         String
+  platformId   String?
   seed         String?
   region       String?
   status       String?

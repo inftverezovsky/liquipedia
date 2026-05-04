@@ -11,6 +11,8 @@ const navItems = [
   { href: "/", label: "Главная" },
   { href: "/dota2", label: "Dota 2" },
   { href: "/counterstrike", label: "Counter-Strike" },
+  { href: "/leagueoflegends", label: "League of Legends" },
+  { href: "/valorant", label: "Valorant" },
   { href: "/history", label: "История загрузок" },
   { href: "/settings", label: "Настройки API" }
 ];

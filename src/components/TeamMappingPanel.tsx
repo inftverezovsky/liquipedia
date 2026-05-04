@@ -114,7 +114,7 @@ export default function TeamMappingPanel({
                     type="text"
                     value={entry.alias}
                     onChange={(e) => handleChange(name, "alias", e.target.value)}
-                    placeholder="Team Vitality..."
+                    placeholder="Spirit, TS, Team Spirit (через запятую)..."
                     className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-950 focus:border-slate-950 focus:outline-none focus:ring-4 focus:ring-slate-100 transition"
                   />
                 </td>

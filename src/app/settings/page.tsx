@@ -6,6 +6,8 @@ import { ExternalPlatformSettings } from "@/components/ExternalPlatformSettings"
 export default function SettingsPage() {
   const dota2Api = "https://liquipedia.net/dota2/api.php";
   const csApi = "https://liquipedia.net/counterstrike/api.php";
+  const lolApi = "https://liquipedia.net/leagueoflegends/api.php";
+  const valorantApi = "https://liquipedia.net/valorant/api.php";
   const userAgent = "liquipedia-local-dev/0.1 (local development; contact@example.com)";
   const genericInterval = "2100";
   const parseInterval = "31000";
@@ -26,6 +28,8 @@ export default function SettingsPage() {
           <dl className="grid gap-4 text-sm">
             <Row label="Dota 2 API" value={dota2Api} />
             <Row label="Counter-Strike API" value={csApi} />
+            <Row label="League of Legends API" value={lolApi} />
+            <Row label="Valorant API" value={valorantApi} />
             <Row label="User-Agent" value={userAgent} />
             <Row label="Generic interval" value={`${genericInterval} ms`} />
             <Row label="Parse interval" value={`${parseInterval} ms`} />

@@ -32,6 +32,36 @@ async function main() {
       isEnabled: true
     }
   });
+
+  await prisma.discipline.upsert({
+    where: { slug: "leagueoflegends" },
+    update: {
+      name: "League of Legends",
+      baseApiUrl: process.env.LIQUIPEDIA_LOL_API_URL ?? "https://liquipedia.net/leagueoflegends/api.php",
+      isEnabled: true
+    },
+    create: {
+      slug: "leagueoflegends",
+      name: "League of Legends",
+      baseApiUrl: process.env.LIQUIPEDIA_LOL_API_URL ?? "https://liquipedia.net/leagueoflegends/api.php",
+      isEnabled: true
+    }
+  });
+
+  await prisma.discipline.upsert({
+    where: { slug: "valorant" },
+    update: {
+      name: "Valorant",
+      baseApiUrl: process.env.LIQUIPEDIA_VALORANT_API_URL ?? "https://liquipedia.net/valorant/api.php",
+      isEnabled: true
+    },
+    create: {
+      slug: "valorant",
+      name: "Valorant",
+      baseApiUrl: process.env.LIQUIPEDIA_VALORANT_API_URL ?? "https://liquipedia.net/valorant/api.php",
+      isEnabled: true
+    }
+  });
 }
 
 main()

@@ -134,19 +134,30 @@ async function processSinglePage(params: {
   // Save Participants (only if not already there or merge)
   if (normalized.participants.length > 0) {
     for (const p of normalized.participants) {
+      // Check for global mapping to inherit platformId (Check both Name and Alias)
+      const mapping = await prisma.teamMapping.findFirst({
+        where: {
+          disciplineSlug,
+          OR: [
+            { liquipediaName: { equals: p.name, mode: 'insensitive' } },
+            { alias: { contains: p.name, mode: 'insensitive' } }
+          ]
+        }
+      });
+
       await prisma.tournamentParticipant.upsert({
         where: {
-          // Note: We don't have a unique constraint on participants within a tournament yet, 
-          // but we can use tournamentId + name to avoid duplicates on sub-page imports.
           id: `part_${tournament.id}_${p.name.toLowerCase().replace(/\s/g, "_")}`
         },
         update: {
-          logoUrl: p.logoUrl || undefined
+          logoUrl: p.logoUrl || undefined,
+          platformId: mapping?.platformId || undefined // Inherit if found
         },
         create: {
           id: `part_${tournament.id}_${p.name.toLowerCase().replace(/\s/g, "_")}`,
           tournamentId: tournament.id,
           name: p.name,
+          platformId: mapping?.platformId || undefined,
           seed: p.seed,
           region: p.region,
           status: p.status,
@@ -155,7 +166,7 @@ async function processSinglePage(params: {
         }
       });
 
-      // Save to global TeamMapping
+      // Save to global TeamMapping (initial or update logo)
       await prisma.teamMapping.upsert({
         where: {
           disciplineSlug_liquipediaName: {

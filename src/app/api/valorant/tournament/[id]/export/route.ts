@@ -53,6 +53,7 @@ export async function GET(request: Request, { params }: { params: { id: string }
     return {
       matchId: m.matchId,
       matchDateTime: m.matchDateTime,
+      matchTimestamp: m.matchDate ? m.matchDate.getTime() : null,
       teamAId: teamA.id,
       teamAName: teamA.name,
       teamBId: teamB.id,
@@ -88,6 +89,10 @@ export async function GET(request: Request, { params }: { params: { id: string }
     id: tournament.id,
     name: tournament.name,
     platformId: tournament.platformId,
+    startDate: tournament.startDate,
+    endDate: tournament.endDate,
+    startTimestamp: tournament.startDate ? tournament.startDate.getTime() : null,
+    endTimestamp: tournament.endDate ? tournament.endDate.getTime() : null,
     matches: formattedMatches 
   });
 }

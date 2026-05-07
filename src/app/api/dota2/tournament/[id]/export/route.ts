@@ -33,23 +33,36 @@ export async function GET(request: Request, { params }: { params: { id: string }
   });
   const mappingMap = new Map(mappings.map(m => [m.liquipediaName, m]));
 
-  const getTeamInfo = (name: string | null) => {
+  const getTeamInfo = (name: string | null, side: 'A' | 'B') => {
     if (!name || isPlaceholderTeam(name)) {
-      const tbdM = mappingMap.get("TBD");
       return { 
-        id: tbdM?.platformId || "tbd", 
-        name: tbdM?.alias || "TBD" 
+        id: "tbd", 
+        name: name || "TBD",
+        canonicalName: null,
+        internalId: "tbd",
+        mappingConfidence: null
       };
     }
     const m = mappingMap.get(name);
-    const id = m?.platformId || generateInternalTeamId(name);
-    const displayName = m?.alias || name;
-    return { id, name: displayName };
+    
+    // If mapped, platformId should be used.
+    // If not mapped, platformId is null, and id becomes internalTeamId.
+    const internalId = generateInternalTeamId(name);
+    const platformId = m?.platformId || null;
+    
+    return { 
+      id: platformId || internalId, 
+      name: name, // leave Liquipedia name
+      canonicalName: m?.canonicalName || null,
+      internalId,
+      mappingConfidence: m?.confidenceScore || null,
+      platformId
+    };
   };
 
   const formattedMatches = tournament.matches.map(m => {
-    const teamA = getTeamInfo(m.teamAName);
-    const teamB = getTeamInfo(m.teamBName);
+    const teamA = getTeamInfo(m.teamAName, 'A');
+    const teamB = getTeamInfo(m.teamBName, 'B');
     return {
       matchId: m.matchId,
       matchDateTime: m.matchDateTime,
@@ -58,7 +71,16 @@ export async function GET(request: Request, { params }: { params: { id: string }
       teamAName: teamA.name,
       teamBId: teamB.id,
       teamBName: teamB.name,
-      court: m.court
+      court: m.court,
+      // Extra fields
+      teamACanonicalName: teamA.canonicalName,
+      teamBCanonicalName: teamB.canonicalName,
+      teamAInternalId: teamA.internalId,
+      teamBInternalId: teamB.internalId,
+      teamAPlatformId: teamA.platformId,
+      teamBPlatformId: teamB.platformId,
+      teamAMappingConfidence: teamA.mappingConfidence,
+      teamBMappingConfidence: teamB.mappingConfidence
     };
   });
 

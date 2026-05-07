@@ -30,13 +30,7 @@ export async function GET(request: Request) {
 // POST — создать или обновить маппинг
 export async function POST(request: Request) {
   const body = await request.json();
-  const { liquipediaName, disciplineSlug, alias, platformId, logoUrl } = body as {
-    liquipediaName?: string;
-    disciplineSlug?: string;
-    alias?: string;
-    platformId?: string;
-    logoUrl?: string;
-  };
+  const { liquipediaName, disciplineSlug, alias, platformId, canonicalName, status, logoUrl, isManual, isLockedFromAutoMapping } = body as any;
 
   const slug = disciplineSlug || "counterstrike";
 
@@ -44,31 +38,41 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "liquipediaName обязателен" }, { status: 400 });
   }
 
+  const normalizedName = liquipediaName.trim();
+
   const mapping = await prisma.teamMapping.upsert({
     where: { 
       disciplineSlug_liquipediaName: {
         disciplineSlug: slug,
-        liquipediaName: liquipediaName.trim()
+        liquipediaName: normalizedName
       }
     },
     update: {
       alias: alias?.trim() || null,
+      canonicalName: canonicalName?.trim() || null,
       platformId: platformId?.trim() || null,
-      logoUrl: logoUrl?.trim() || undefined
+      logoUrl: logoUrl?.trim() || undefined,
+      status: status || 'manual_mapped',
+      isManual: isManual !== undefined ? isManual : true,
+      isLockedFromAutoMapping: isLockedFromAutoMapping !== undefined ? isLockedFromAutoMapping : true
     },
     create: {
       disciplineSlug: slug,
-      liquipediaName: liquipediaName.trim(),
+      liquipediaName: normalizedName,
       alias: alias?.trim() || null,
+      canonicalName: canonicalName?.trim() || null,
       platformId: platformId?.trim() || null,
-      logoUrl: logoUrl?.trim() || null
+      logoUrl: logoUrl?.trim() || null,
+      status: status || 'manual_mapped',
+      isManual: isManual !== undefined ? isManual : true,
+      isLockedFromAutoMapping: isLockedFromAutoMapping !== undefined ? isLockedFromAutoMapping : true
     }
   });
 
   // Cascade update: find all tournaments for this discipline and update participants with this name
   await prisma.tournamentParticipant.updateMany({
     where: {
-      name: liquipediaName.trim(),
+      name: normalizedName,
       tournament: {
         disciplineSlug: slug
       }
@@ -90,12 +94,38 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: "Параметр name обязателен" }, { status: 400 });
   }
 
-  await prisma.teamMapping.delete({
+  const normalizedName = name.trim();
+
+  // Don't physically delete, instead mark as unmapped and locked
+  await prisma.teamMapping.update({
     where: { 
       disciplineSlug_liquipediaName: {
         disciplineSlug,
-        liquipediaName: name.trim()
+        liquipediaName: normalizedName
       }
+    },
+    data: {
+      platformId: null,
+      canonicalName: null,
+      alias: null,
+      status: 'manual_unmapped',
+      isManual: true,
+      isLockedFromAutoMapping: true,
+      matchMethod: null,
+      confidenceScore: null
+    }
+  });
+
+  // Clear participant platformId
+  await prisma.tournamentParticipant.updateMany({
+    where: {
+      name: normalizedName,
+      tournament: {
+        disciplineSlug
+      }
+    },
+    data: {
+      platformId: null
     }
   });
 

@@ -13,41 +13,60 @@ export default async function HistoryPage() {
   });
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8 animate-in">
       <div>
-        <p className="text-sm font-semibold uppercase tracking-wide text-slate-500">Imports</p>
-        <h1 className="mt-2 text-3xl font-bold tracking-tight text-slate-950">История ручных загрузок</h1>
+        <p className="text-[10px] font-black uppercase tracking-[0.3em] text-indigo-600">Audit Logs</p>
+        <h1 className="mt-2 text-4xl font-black tracking-tighter text-slate-950">История загрузок</h1>
+        <p className="mt-4 text-lg font-bold text-slate-700">Журнал всех операций по импорту данных из Liquipedia.</p>
       </div>
 
-      <section className="rounded-3xl bg-white p-6 ring-1 ring-slate-200">
+      <section className="premium-card overflow-hidden bg-white shadow-sm border-slate-200">
         {imports.length > 0 ? (
           <div className="overflow-x-auto">
-            <table className="min-w-full text-left text-sm">
-              <thead className="text-slate-500">
+            <table className="min-w-full text-left text-sm border-collapse">
+              <thead className="bg-slate-50 border-b border-slate-200">
                 <tr>
-                  <th className="border-b border-slate-200 py-2 pr-4">Турнир</th>
-                  <th className="border-b border-slate-200 py-2 pr-4">Статус</th>
-                  <th className="border-b border-slate-200 py-2 pr-4">Старт</th>
-                  <th className="border-b border-slate-200 py-2 pr-4">Источник</th>
+                  <th className="py-4 px-8 text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Турнир</th>
+                  <th className="py-4 px-8 text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Статус</th>
+                  <th className="py-4 px-8 text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Дата и время</th>
+                  <th className="py-4 px-8 text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 text-right">Источник</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="divide-y divide-slate-100">
                 {imports.map((item) => (
-                  <tr key={item.id}>
-                    <td className="border-b border-slate-100 py-3 pr-4 font-medium text-slate-950">
-                      {item.tournament ? (
-                        <Link className="underline underline-offset-4" href={`/${item.tournament.disciplineSlug}/tournament/${item.tournament.id}`}>
-                          {item.pageTitle}
-                        </Link>
-                      ) : (
-                        item.pageTitle
-                      )}
+                  <tr key={item.id} className="group hover:bg-slate-50/50 transition-colors">
+                    <td className="py-5 px-8">
+                      <div className="flex flex-col gap-1">
+                        {item.tournament ? (
+                          <Link 
+                            className="text-base font-black text-slate-950 hover:text-indigo-600 underline decoration-slate-200 underline-offset-4 decoration-2" 
+                            href={`/${item.tournament.disciplineSlug}/tournament/${item.tournament.id}`}
+                          >
+                            {item.pageTitle}
+                          </Link>
+                        ) : (
+                          <span className="text-base font-black text-slate-900">{item.pageTitle}</span>
+                        )}
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                          {item.tournament?.disciplineSlug || "unknown"}
+                        </span>
+                      </div>
                     </td>
-                    <td className="border-b border-slate-100 py-3 pr-4"><StatusBadge status={item.status} /></td>
-                    <td className="border-b border-slate-100 py-3 pr-4 text-slate-600">{formatDateTime(item.startedAt)}</td>
-                    <td className="border-b border-slate-100 py-3 pr-4">
-                      <a className="text-slate-700 underline underline-offset-4" href={item.pageUrl} target="_blank" rel="noreferrer">
-                        Liquipedia
+                    <td className="py-5 px-8">
+                      <StatusBadge status={item.status} />
+                    </td>
+                    <td className="py-5 px-8 text-sm font-bold text-slate-700 tabular-nums">
+                      {formatDateTime(item.startedAt)}
+                    </td>
+                    <td className="py-5 px-8 text-right">
+                      <a 
+                        className="inline-flex items-center gap-2 rounded-lg bg-slate-100 px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-slate-600 hover:bg-slate-900 hover:text-white transition-all" 
+                        href={item.pageUrl} 
+                        target="_blank" 
+                        rel="noreferrer"
+                      >
+                        Source
+                        <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
                       </a>
                     </td>
                   </tr>
@@ -56,7 +75,9 @@ export default async function HistoryPage() {
             </table>
           </div>
         ) : (
-          <p className="text-sm text-slate-500">Пока нет загрузок. Выберите дисциплину и загрузите первый чемпионат.</p>
+          <div className="py-20 text-center">
+            <p className="text-sm font-bold text-slate-400">Журнал пуст. Загрузите первый турнир через панель дисциплин.</p>
+          </div>
         )}
       </section>
     </div>

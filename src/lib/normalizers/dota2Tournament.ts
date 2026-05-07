@@ -25,6 +25,7 @@ export type NormalizedParticipant = {
 
 export type NormalizedMatch = {
   matchId?: string | null;
+  lpNumericalId?: bigint | null;
   stage?: string | null;
   round?: string | null;
   matchDate?: Date | null;
@@ -472,9 +473,12 @@ function normalizeMatchCandidate(
     extraHint: indexHint
   });
 
+  const lpNumericalId = stringToNumericalId(matchId);
+
   return {
     ...candidate,
     matchId,
+    lpNumericalId,
     teamAId,
     teamAName: finalTeamAName,
     teamBId,
@@ -559,6 +563,12 @@ function createStableMatchId(input: {
   ].join("|");
   const hash = createHash("md5").update(data).digest("hex").slice(0, 12);
   return `match_${hash}`;
+}
+
+export function stringToNumericalId(str: string): bigint {
+  const hash = createHash("md5").update(str).digest("hex").slice(0, 12);
+  // Convert hex to BigInt, ensuring it's positive and within BigInt range (12 hex chars is max 15 decimal digits)
+  return BigInt("0x" + hash);
 }
 
 // Keep backward compat

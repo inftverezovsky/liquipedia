@@ -64,6 +64,11 @@ export async function POST(request: Request) {
       include: { participants: true, matches: true, lastImport: true }
     });
 
+    if (fullTournament) {
+      const { ensureTeamMappingsForTournament } = await import("@/lib/teams/mapping");
+      await ensureTeamMappingsForTournament(fullTournament.id, "dota2");
+    }
+
     return NextResponse.json({ tournament: fullTournament, normalized });
   } catch (error) {
     console.error(error);

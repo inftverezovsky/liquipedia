@@ -57,32 +57,32 @@ export default function DisciplinePlatformIdPanel({ disciplineSlug }: { discipli
   if (loading) return <div className="h-10 w-full animate-pulse rounded-xl bg-slate-100" />;
 
   return (
-    <div className="rounded-2xl border border-blue-100 bg-blue-50/50 p-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+    <div className="rounded-2xl border border-indigo-200 bg-indigo-50 p-6">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <h2 className="text-sm font-semibold text-blue-900">Глобальный ID дисциплины (Admin)</h2>
-          <p className="text-xs text-blue-700">Матчи будут привязаны к этой родительской категории</p>
+          <h2 className="text-base font-black text-indigo-950 uppercase tracking-tight">Глобальный ID дисциплины (Admin)</h2>
+          <p className="text-sm font-bold text-indigo-700/80 mt-1">Матчи будут привязаны к этой родительской категории в вашей админке.</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
           <input
             type="text"
             value={platformId}
             onChange={(e) => setPlatformId(e.target.value)}
-            placeholder="ID из админки"
-            className="w-[180px] rounded-lg border border-blue-200 bg-white px-3 py-1.5 text-sm text-slate-900 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
+            placeholder="Platform ID"
+            className="w-[200px] rounded-xl border border-indigo-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-950 focus:border-indigo-600 focus:outline-none focus:ring-4 focus:ring-indigo-600/5 tabular-nums placeholder:text-slate-300 shadow-sm"
           />
           <div className="flex gap-2">
             <button
               onClick={handleSave}
               disabled={saving}
-              className="rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700 disabled:opacity-50"
+              className="rounded-xl bg-indigo-600 px-6 py-2.5 text-sm font-black text-white shadow-md shadow-indigo-600/20 transition-all hover:bg-indigo-700 disabled:opacity-50"
             >
-              {saving ? "..." : saved ? "✓" : "Save"}
+              {saving ? "..." : saved ? "Готово ✓" : "Сохранить"}
             </button>
             <button
               onClick={handleRemove}
               disabled={saving}
-              className="rounded-lg bg-red-100 px-3 py-1.5 text-xs font-medium text-red-700 transition-colors hover:bg-red-200 disabled:opacity-50 border border-red-200"
+              className="rounded-xl bg-white border border-rose-200 px-4 py-2.5 text-xs font-black text-rose-600 transition-all hover:bg-rose-50 disabled:opacity-50"
             >
               Удалить
             </button>

@@ -72,30 +72,60 @@ async function processSinglePage(params: {
 }) {
   const { disciplineSlug, apiUrl, pageId, title, pageUrl, normalizer, importRecordId, tournamentId } = params;
 
-  // Fetch
-  const page = await fetchPageWikitext(apiUrl, disciplineSlug, { pageId, title });
-  const pageTitle = page.title ?? title;
-  const parsedHtml = await fetchPageParsed(apiUrl, pageTitle);
+  // 1. Check for cached snapshot (less than 366 days old)
+  const cacheThreshold = new Date(Date.now() - 366 * 24 * 60 * 60 * 1000);
+  const cachedSnapshot = await prisma.rawSnapshot.findFirst({
+    where: {
+      pageTitle: title,
+      fetchedAt: { gte: cacheThreshold }
+    },
+    orderBy: { fetchedAt: 'desc' }
+  });
+
+  let wikitext: string;
+  let pageTitle: string;
+  let rawJson: any;
+  let parsedHtml: string | undefined;
+  let currentPageId: number | undefined = pageId;
+
+  if (cachedSnapshot && cachedSnapshot.rawWikitext && cachedSnapshot.rawHtml) {
+    console.log(`[Importer] Using cached data for ${title}`);
+    wikitext = cachedSnapshot.rawWikitext;
+    pageTitle = cachedSnapshot.pageTitle;
+    rawJson = cachedSnapshot.rawJson;
+    parsedHtml = cachedSnapshot.rawHtml;
+    currentPageId = cachedSnapshot.pageId ?? pageId;
+  } else {
+    // Fetch
+    console.log(`[Importer] Fetching fresh data for ${title}`);
+    const page = await fetchPageWikitext(apiUrl, disciplineSlug, { pageId, title });
+    wikitext = page.wikitext;
+    pageTitle = page.title ?? title;
+    rawJson = page.raw;
+    parsedHtml = await fetchPageParsed(apiUrl, pageTitle);
+    currentPageId = page.pageId ?? pageId;
+
+    // Save Snapshot
+    await prisma.rawSnapshot.create({
+      data: {
+        tournamentImportId: importRecordId,
+        source: "liquipedia-mediawiki-api",
+        pageId: currentPageId,
+        pageTitle,
+        rawJson: rawJson as Prisma.InputJsonValue,
+        rawWikitext: wikitext,
+        rawHtml: parsedHtml
+      }
+    });
+  }
 
   // Normalize
   const normalized = normalizer({
-    pageId: page.pageId ?? pageId,
+    pageId: currentPageId,
     title: pageTitle,
-    pageUrl: page.fullUrl ?? pageUrl,
-    wikitext: page.wikitext,
+    pageUrl: pageUrl,
+    wikitext,
     parsedHtml
-  });
-
-  // Snapshot
-  await prisma.rawSnapshot.create({
-    data: {
-      tournamentImportId: importRecordId,
-      source: "liquipedia-mediawiki-api",
-      pageId: page.pageId ?? pageId,
-      pageTitle,
-      rawJson: page.raw as Prisma.InputJsonValue,
-      rawWikitext: page.wikitext
-    }
   });
 
   // Upsert Tournament (only for main page, or update existing)
@@ -207,6 +237,8 @@ async function processSinglePage(params: {
             scoreB: m.scoreB,
             status: m.status,
             matchDate: m.matchDate || existing.matchDate,
+            lpNumericalId: m.lpNumericalId || existing.lpNumericalId,
+            platformId: (m as any).platformId || existing.platformId,
             // If conflict, we could log it or set a flag
             rawText: hasConflict ? `CONFLICT: ${existing.scoreA}-${existing.scoreB} -> ${m.scoreA}-${m.scoreB}\n${m.rawText}` : m.rawText
           }
@@ -230,6 +262,8 @@ async function processSinglePage(params: {
             status: m.status,
             court: m.court,
             sourceUrl: m.sourceUrl,
+            lpNumericalId: m.lpNumericalId,
+            platformId: (m as any).platformId || undefined,
             rawText: m.rawText
           }
         });

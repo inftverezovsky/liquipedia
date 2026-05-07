@@ -46,3 +46,50 @@ export function isPlaceholderTeam(name: string | null | undefined): boolean {
   
   return false;
 }
+
+export function normalizeTeamName(name: string): string {
+  if (!name) return "";
+  let n = name.trim().toLowerCase();
+  
+  // Remove wiki markup
+  n = n.replace(/\[\[([^|\]]+\|)?([^\]]+)\]\]/g, '$2');
+  n = n.replace(/\{\{[^}]+\}\}/g, '');
+  
+  // Replace ё with е
+  n = n.replace(/ё/g, 'е');
+  
+  // Remove dots, commas, parentheses
+  n = n.replace(/[.,()]/g, '');
+  
+  // Normalize hyphens to spaces
+  n = n.replace(/[-_]/g, ' ');
+  
+  // Remove special characters, keeping letters, numbers, and spaces
+  n = n.replace(/[^\w\sа-я]/g, '');
+  
+  // Remove extra spaces
+  n = n.replace(/\s+/g, ' ').trim();
+  
+  return n;
+}
+
+export function getTeamNameCandidates(name: string): string[] {
+  const normalized = normalizeTeamName(name);
+  if (!normalized) return [];
+  const candidates = [normalized];
+  
+  if (normalized.includes(' team')) {
+    candidates.push(normalized.replace(/ team/g, '').trim());
+  } 
+  if (normalized.startsWith('team ')) {
+    candidates.push(normalized.replace(/^team /g, '').trim());
+  }
+  
+  // Also push without any 'team'
+  const withoutTeam = normalized.replace(/\bteam\b/g, '').replace(/\s+/g, ' ').trim();
+  if (withoutTeam && withoutTeam !== normalized) {
+    candidates.push(withoutTeam);
+  }
+  
+  return Array.from(new Set(candidates)).filter(Boolean);
+}

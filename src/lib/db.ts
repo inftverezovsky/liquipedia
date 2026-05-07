@@ -11,4 +11,10 @@ export const prisma =
 if (process.env.NODE_ENV !== "production") {
   globalForPrisma.prisma = prisma;
 }
-// Trigger recompile
+
+// Polyfill BigInt to allow JSON serialization
+if (typeof BigInt !== "undefined") {
+  (BigInt.prototype as any).toJSON = function () {
+    return this.toString();
+  };
+}

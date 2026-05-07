@@ -66,13 +66,9 @@ export default function TournamentPlatformIdPanel({
 
     setExporting(true);
     try {
-      // For now this is a placeholder for the actual upload logic
       console.log(`Exporting matches ${selectedIds.join(", ")} to platform header ${platformId}`);
-      
-      // Simulate API call
       await new Promise(resolve => setTimeout(resolve, 1500));
-      
-      alert(`Готово! ${selectedIds.length} матчей успешно подготовлены для заливки в шапку ${platformId}. (Это демо-заглушка, реальная интеграция с платформой обсуждается)`);
+      alert(`Готово! ${selectedIds.length} матчей успешно подготовлены для заливки в шапку ${platformId}. (Это демо-заглушка)`);
     } catch (error) {
       console.error(error);
       alert("Ошибка при экспорте");
@@ -82,33 +78,32 @@ export default function TournamentPlatformIdPanel({
   }
 
   return (
-    <div className="mt-6 border-t border-slate-200 pt-4">
-      <label htmlFor="tournament-platform-id" className="block text-sm font-medium text-slate-700">
-        ID шапки турнира (на рабочей платформе)
+    <div className="mt-6 border-t border-slate-200 pt-6">
+      <label htmlFor="tournament-platform-id" className="block text-xs font-black uppercase tracking-[0.2em] text-slate-900">
+        ID шапки турнира
       </label>
-      <div className="mt-2 flex flex-wrap gap-3">
+      <div className="mt-3 flex flex-wrap gap-3">
         <input
           id="tournament-platform-id"
           type="text"
           value={platformId}
           onChange={(e) => setPlatformId(e.target.value)}
           placeholder="Например: 554332"
-          className="w-[240px] rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
+          className="w-[240px] rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-bold text-slate-950 focus:border-indigo-600 focus:outline-none focus:ring-4 focus:ring-indigo-600/5 placeholder:text-slate-300"
         />
         <div className="flex gap-2">
           <button
             onClick={handleSave}
             disabled={saving}
-            className="rounded-lg bg-slate-100 px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-200 disabled:opacity-50"
+            className="rounded-xl bg-slate-100 px-4 py-2.5 text-[10px] font-black uppercase tracking-widest text-slate-900 transition-all hover:bg-slate-200 disabled:opacity-50"
           >
-            {saving ? "Сохранение..." : saved ? "Сохранено ✓" : "Сохранить ID"}
+            {saving ? "..." : saved ? "Готово ✓" : "Save ID"}
           </button>
           
           <button
             onClick={handleRemove}
             disabled={saving}
-            className="rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-600 transition-colors hover:bg-red-100 disabled:opacity-50 border border-red-100"
-            title="Очистить ID"
+            className="rounded-xl bg-rose-50 border border-rose-100 px-4 py-2.5 text-[10px] font-black uppercase tracking-widest text-rose-600 transition-all hover:bg-rose-100 disabled:opacity-50"
           >
             Удалить
           </button>
@@ -117,23 +112,13 @@ export default function TournamentPlatformIdPanel({
         <button
           onClick={handleExport}
           disabled={exporting}
-          className="rounded-lg bg-blue-600 px-6 py-2 text-sm font-bold text-white shadow-md transition-all hover:bg-blue-700 active:scale-95 disabled:opacity-50 flex items-center gap-2"
+          className="btn-primary px-8 text-xs disabled:opacity-50"
         >
-          {exporting ? (
-            <>
-              <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-              </svg>
-              Заливка...
-            </>
-          ) : (
-            <>Залить в платформу</>
-          )}
+          {exporting ? "Заливка..." : "Залить в платформу"}
         </button>
       </div>
-      <p className="mt-1 text-xs text-slate-500">
-        Выберите матчи выше и нажмите &quot;Залить&quot;, чтобы отправить их на рабочую платформу.
+      <p className="mt-2 text-[10px] font-bold text-slate-500 uppercase tracking-tight">
+        Выберите матчи выше и нажмите кнопку заливки.
       </p>
     </div>
   );

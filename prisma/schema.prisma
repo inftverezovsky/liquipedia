@@ -89,6 +89,7 @@ model RawSnapshot {
   pageTitle          String
   rawJson            Json
   rawWikitext        String?          @db.Text
+  rawHtml            String?          @db.Text
   fetchedAt          DateTime         @default(now())
 
   @@index([pageTitle])
@@ -161,12 +162,15 @@ model TournamentMatch {
   status        String?
   court         String?
   sourceUrl     String?
+  lpNumericalId BigInt?     @unique
+  platformId    String?
   syncedAt      DateTime?
   rawText       String?    @db.Text
   createdAt     DateTime   @default(now())
 
   @@index([tournamentId])
   @@index([matchDate])
+  @@index([platformId])
 }
 
 model GlobalSettings {
@@ -174,15 +178,46 @@ model GlobalSettings {
   value String @db.Text
 }
 
+enum MappingStatus {
+  unmapped
+  auto_mapped
+  manual_mapped
+  manual_unmapped
+  ambiguous
+  ignored
+}
+
+model AdminTeam {
+  id              String   @id @default(cuid())
+  disciplineSlug  String
+  platformId      String
+  platformName    String
+  normalizedName  String
+  sourceFileName  String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([disciplineSlug])
+  @@index([normalizedName])
+}
+
 model TeamMapping {
-  id             String   @id @default(cuid())
-  disciplineSlug String   @default("counterstrike")
-  liquipediaName String
-  alias          String?
-  platformId     String?
-  logoUrl        String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id                       String        @id @default(cuid())
+  disciplineSlug           String        @default("counterstrike")
+  liquipediaName           String
+  liquipediaNormalizedName String?
+  internalTeamId           String?
+  platformId               String?
+  canonicalName            String?
+  confidenceScore          Float?
+  matchMethod              String?
+  status                   MappingStatus @default(unmapped)
+  isManual                 Boolean       @default(false)
+  isLockedFromAutoMapping  Boolean       @default(false)
+  alias                    String?
+  logoUrl                  String?
+  createdAt                DateTime      @default(now())
+  updatedAt                DateTime      @updatedAt
 
   @@unique([disciplineSlug, liquipediaName])
   @@index([liquipediaName])

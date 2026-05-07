@@ -12,17 +12,21 @@
     "prisma:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:seed": "tsx prisma/seed.ts",
+    "import:dota2-admin-teams": "tsx scripts/import-admin-teams.ts",
     "setup": "npm install && npm run prisma:generate && npm run db:push && npm run db:seed"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
     "axe-core": "^4.11.4",
     "cheerio": "^1.2.0",
+    "fast-levenshtein": "^3.0.0",
     "next": "^14.2.23",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@types/fast-levenshtein": "^0.0.4",
     "@types/node": "^20.17.6",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",

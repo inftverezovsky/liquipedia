@@ -221,7 +221,13 @@ async function processSinglePage(params: {
     for (const m of normalized.matches) {
       const matchId = m.matchId ?? `fallback_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       
-      const existing = await prisma.tournamentMatch.findUnique({ where: { matchId } });
+      // Try to find existing by matchId OR lpNumericalId
+      let existing = await prisma.tournamentMatch.findUnique({ where: { matchId } });
+      if (!existing && m.lpNumericalId) {
+        existing = await prisma.tournamentMatch.findFirst({ 
+          where: { lpNumericalId: m.lpNumericalId } 
+        });
+      }
       
       if (existing) {
         // Compare for conflicts

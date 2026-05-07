@@ -223,3 +223,58 @@ model TeamMapping {
   @@index([liquipediaName])
   @@index([platformId])
 }
+
+model DisciplineAdminSettings {
+  id                String   @id @default(cuid())
+  disciplineSlug    String   @unique
+  apiUrl            String?
+  adminSportId      String?
+  adminMax          String?
+  defaultShapkaId   String?
+  timezone          String   @default("Europe/Moscow")
+  dateFormat        String   @default("DD.MM.YYYY HH:mm:ss")
+  requestMode       String   @default("legacy_raw") // legacy_raw, urlencoded, multipart
+  sslVerify         Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+model TournamentAdminMapping {
+  id                   String   @id @default(cuid())
+  disciplineSlug       String
+  tournamentId         String   @unique
+  sourceTournamentId   String?
+  sourceTournamentName String
+  adminShapkaId        String?
+  adminShapkaName      String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@index([disciplineSlug])
+}
+
+model AdminUploadLog {
+  id                  String   @id @default(cuid())
+  disciplineSlug      String
+  tournamentId        String
+  apiUrl              String
+  adminSportId        String?
+  adminMax            String?
+  adminShapkaId       String?
+  requestMode         String
+  timezone            String
+  dateFormat          String
+  phpArrayJson        Json
+  serializedFixt      String   @db.Text
+  readyMatchesCount   Int
+  skippedMatchesCount Int
+  skippedMatchesJson  Json
+  responseRaw         String?  @db.Text
+  responseParsedJson  Json?
+  status              String   @default("pending") // success, success_like, failed, pending
+  errorMessage        String?  @db.Text
+  createdAt           DateTime @default(now())
+
+  @@index([disciplineSlug])
+  @@index([tournamentId])
+}

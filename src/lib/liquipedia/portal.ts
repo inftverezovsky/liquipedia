@@ -122,53 +122,77 @@ export async function fetchDisciplinePortal(slug: string): Promise<DisciplinePor
 
     const uniqueTournaments = Array.from(new Map(tournaments.map(t => [t.url, t])).values());
 
-    // Filter tournaments: ongoing OR upcoming starting within 7 days
     const now = new Date();
-    const nextWeek = new Date();
-    nextWeek.setDate(now.getDate() + 7);
+    const months: Record<string, number> = {
+      jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11
+    };
 
-    const filteredTournaments = uniqueTournaments.filter(t => {
-      if (t.status === 'ongoing') return true;
-      if (!t.dates) return false;
-
+    const enriched = uniqueTournaments.map(t => {
+      let startDate: Date | null = null;
+      let endDate: Date | null = null;
       try {
-        const months: Record<string, number> = {
-          jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11
-        };
         const dateLower = t.dates.toLowerCase();
         let month = -1;
-        let day = -1;
-
+        
         for (const [m, i] of Object.entries(months)) {
           if (dateLower.includes(m)) {
             month = i;
             break;
           }
         }
-        const dayMatch = dateLower.match(/\d+/);
-        if (dayMatch) day = parseInt(dayMatch[0]);
 
-        if (month !== -1 && day !== -1) {
-          const startDate = new Date(now.getFullYear(), month, day);
-          if (startDate.getTime() < now.getTime() - 1000 * 60 * 60 * 24 * 180) {
-            startDate.setFullYear(now.getFullYear() + 1);
+        const days = dateLower.match(/\d+/g);
+        if (month !== -1 && days && days.length > 0) {
+          const startDay = parseInt(days[0]);
+          startDate = new Date(now.getFullYear(), month, startDay);
+          
+          if (startDate.getTime() < now.getTime() - 1000 * 60 * 60 * 24 * 30) {
+             if (month < now.getMonth()) {
+               startDate.setFullYear(now.getFullYear() + 1);
+             }
           }
-          return startDate <= nextWeek;
+
+          if (days.length > 1) {
+            const endDay = parseInt(days[days.length - 1]);
+            endDate = new Date(startDate.getFullYear(), month, endDay);
+          } else {
+            endDate = new Date(startDate.getTime());
+          }
         }
-      } catch (e) { return false; }
-      return false;
+      } catch (e) {}
+      return { ...t, startDate, endDate };
     });
 
-    // Sort: Ongoing first, then by date (if possible)
-    const sortedTournaments = filteredTournaments.sort((a, b) => {
+    const filtered = enriched.filter(t => {
+      if (t.status === 'ongoing') return true;
+      if (!t.startDate || !t.endDate) return t.status !== 'completed';
+      if (t.endDate.getTime() < now.getTime() - 1000 * 60 * 60 * 24) return false;
+      if (t.status === 'upcoming') {
+        const diffDays = (t.startDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
+        return diffDays <= 14;
+      }
+      return true;
+    });
+
+    const sortedTournaments = filtered.sort((a, b) => {
       if (a.status === 'ongoing' && b.status !== 'ongoing') return -1;
       if (a.status !== 'ongoing' && b.status === 'ongoing') return 1;
+      if (a.startDate && b.startDate) {
+        return a.startDate.getTime() - b.startDate.getTime();
+      }
       return 0;
     });
 
+    const nameMapping: Record<string, string> = {
+      dota2: "Dota 2",
+      counterstrike: "Counter-Strike",
+      leagueoflegends: "League of Legends",
+      valorant: "Valorant"
+    };
+
     return {
       slug,
-      name: slug.charAt(0).toUpperCase() + slug.slice(1),
+      name: nameMapping[slug] || (slug.charAt(0).toUpperCase() + slug.slice(1)),
       tournaments: sortedTournaments.slice(0, 15)
     };
   } catch (err) {

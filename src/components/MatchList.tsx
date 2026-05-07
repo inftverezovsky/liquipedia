@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
+import { useParams } from "next/navigation";
 import { isPlaceholderTeam } from "@/lib/teams";
-import { SyncMatchesButton } from "./SyncMatchesButton";
 
 type Match = {
   id: string;
@@ -26,16 +26,20 @@ type MappingInfo = { alias: string | null; platformId: string | null; logoUrl?: 
 
 function getMatchDateObj(match: Match): Date | null {
   let d: Date | null = null;
-  if (match.matchDateTime) {
-    // Try to parse exact datetime string (e.g., "May 7, 2026 - 15:00 UTC")
+  
+  // 1. Priority: actual Date object (from data-timestamp)
+  if (match.matchDate) {
+    d = typeof match.matchDate === "string" ? new Date(match.matchDate) : match.matchDate;
+    if (isNaN(d.getTime())) d = null;
+  }
+  
+  // 2. Fallback: parse the matchDateTime string
+  if (!d && match.matchDateTime) {
     const cleaned = match.matchDateTime.replace(/\s*-\s*/, " ").replace(/\s+[A-Z]{2,5}$/, "");
     const parsed = new Date(cleaned + " UTC");
     if (!isNaN(parsed.getTime())) d = parsed;
   }
-  if (!d && match.matchDate) {
-    d = typeof match.matchDate === "string" ? new Date(match.matchDate) : match.matchDate;
-    if (isNaN(d.getTime())) d = null;
-  }
+  
   return d;
 }
 
@@ -47,23 +51,95 @@ function getMatchTimestamp(match: Match): number | null {
 export default function MatchList({
   matches,
   mappings,
-  disciplineSlug
+  disciplineSlug,
+  selectedIds,
+  setSelectedIds
 }: {
   matches: Match[];
   mappings: Record<string, MappingInfo>;
   disciplineSlug: string;
+  selectedIds: Set<string>;
+  setSelectedIds: (ids: Set<string>) => void;
 }) {
+  const params = useParams();
+  const tournamentId = params.id as string;
+  
   const [showAll, setShowAll] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [uploadHistory, setUploadHistory] = useState<any[]>([]);
+
+  // Fetch upload history on mount and on success event
+  useEffect(() => {
+    async function fetchHistory() {
+      if (!tournamentId) return;
+      try {
+        const res = await fetch(`/api/${disciplineSlug}/tournament/${tournamentId}/upload-history`);
+        const data = await res.json();
+        if (data.ok) setUploadHistory(data.logs);
+      } catch (e) {
+        console.error("Failed to fetch upload history:", e);
+      }
+    }
+    fetchHistory();
+
+    const handleSuccess = () => fetchHistory();
+    window.addEventListener('admin-upload-success', handleSuccess);
+    return () => window.removeEventListener('admin-upload-success', handleSuccess);
+  }, [disciplineSlug, tournamentId]);
+
+  const dedupedMatches = useMemo(() => {
+    const results: Match[] = [];
+    
+    matches.forEach(m => {
+      const tA = m.teamAName?.trim().toLowerCase() || "";
+      const tB = m.teamBName?.trim().toLowerCase() || "";
+      if (tA === "tbd" && tB === "tbd") {
+        results.push(m);
+        return;
+      }
+      const [t1, t2] = [tA, tB].sort();
+      const d = getMatchDateObj(m);
+      const ts = d ? d.getTime() : 0;
+
+      // Find if we already have this pair within a 12-hour window
+      const existingIdx = results.findIndex(r => {
+        const rA = r.teamAName?.trim().toLowerCase() || "";
+        const rB = r.teamBName?.trim().toLowerCase() || "";
+        const [rt1, rt2] = [rA, rB].sort();
+        if (rt1 !== t1 || rt2 !== t2) return false;
+        
+        const rd = getMatchDateObj(r);
+        const rts = rd ? rd.getTime() : 0;
+        
+        // 12 hour window (43,200,000 ms)
+        return Math.abs(rts - ts) < 12 * 60 * 60 * 1000;
+      });
+
+      if (existingIdx === -1) {
+        results.push(m);
+      } else {
+        // Preference: match with platformId or the one with a more recent date if both have IDs
+        const existing = results[existingIdx];
+        if (!existing.platformId && m.platformId) {
+          results[existingIdx] = m;
+        } else if (existing.platformId && m.platformId) {
+          // If both have IDs, maybe keep the one with the later matchDate (likely more updated)
+          if (ts > (getMatchDateObj(existing)?.getTime() || 0)) {
+            results[existingIdx] = m;
+          }
+        }
+      }
+    });
+    return results;
+  }, [matches]);
 
   const sortedMatches = useMemo(() => {
-    return [...matches].sort((a, b) => {
+    return [...dedupedMatches].sort((a, b) => {
       const tsA = getMatchTimestamp(a) || Infinity;
       const tsB = getMatchTimestamp(b) || Infinity;
       if (tsA !== tsB) return tsA - tsB;
       return a.id.localeCompare(b.id);
     });
-  }, [matches]);
+  }, [dedupedMatches]);
 
   const now = Date.now();
   const upcomingMatches = useMemo(() => sortedMatches.filter((m) => {
@@ -98,13 +174,16 @@ export default function MatchList({
   function formatMoscowDate(match: Match): string {
     const d = getMatchDateObj(match);
     if (!d) return "—";
-    const msk = new Date(d.getTime() + 3 * 60 * 60 * 1000);
-    const dd = String(msk.getUTCDate()).padStart(2, "0");
-    const mm = String(msk.getUTCMonth() + 1).padStart(2, "0");
-    const yyyy = msk.getUTCFullYear();
-    const hh = String(msk.getUTCHours()).padStart(2, "0");
-    const min = String(msk.getUTCMinutes()).padStart(2, "0");
-    return `${dd}.${mm}.${yyyy} ${hh}:${min}`;
+    
+    return new Intl.DateTimeFormat("ru-RU", {
+      timeZone: "Europe/Moscow",
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false
+    }).format(d).replace(",", "");
   }
 
   function isMatchReady(match: Match): boolean {
@@ -115,21 +194,52 @@ export default function MatchList({
     return !!(pidA && pidB);
   }
 
+  function isMatchInHistory(match: Match): boolean {
+    if (!match.teamAName || !match.teamBName) return false;
+    const pidA = mappings[match.teamAName]?.platformId;
+    const pidB = mappings[match.teamBName]?.platformId;
+    if (!pidA || !pidB) return false;
+
+    const d = getMatchDateObj(match);
+    if (!d) return false;
+    
+    // Format exactly as it is sent to the API: dd.MM.yyyy HH:mm:ss
+    const mDate = new Intl.DateTimeFormat("ru-RU", {
+      timeZone: "Europe/Moscow",
+      day: "2-digit", month: "2-digit", year: "numeric",
+      hour: "2-digit", minute: "2-digit", second: "2-digit",
+      hour12: false
+    }).format(d).replace(",", "");
+
+    return uploadHistory.some(log => {
+      const payload = log.phpArrayJson;
+      if (!payload || !payload.match) return false;
+      return payload.match.some((m: any) => {
+        // Compare platform IDs and formatted date string
+        const teamMatch = 
+          (String(m.team1) === String(pidA) && String(m.team2) === String(pidB)) ||
+          (String(m.team1) === String(pidB) && String(m.team2) === String(pidA));
+        
+        return teamMatch && m.date === mDate;
+      });
+    });
+  }
+
   function TeamDisplay({ name, side }: { name: string | null; side: "left" | "right" }) {
     const isTbd = !name || isPlaceholderTeam(name);
     const effectiveName = isTbd ? "TBD" : name;
     const m = mappings[effectiveName];
-    const alias = m?.alias || "—";
+    const alias = m?.alias;
     const pid = m?.platformId || "";
 
     return (
       <div className={`flex flex-col min-w-0 ${side === "left" ? "text-right" : "text-left"}`}>
-        <span className="truncate text-sm font-black text-slate-950">
+        <span className="truncate text-xl font-medium text-slate-900 tracking-tight leading-tight">
           {effectiveName}
         </span>
-        <div className={`flex items-center gap-1.5 mt-0.5 ${side === "left" ? "justify-end" : "justify-start"}`}>
-          <span className="text-[10px] font-bold text-slate-500">({alias})</span>
-          <span className={`text-[10px] font-black px-1.5 py-0.5 rounded ${pid ? "bg-indigo-600 text-white" : "bg-rose-100 text-rose-600"}`}>
+        <div className={`flex items-center gap-2 mt-1.5 ${side === "left" ? "justify-end" : "justify-start"}`}>
+          {alias && <span className="text-[10px] font-normal text-slate-400 uppercase tracking-wider">{alias}</span>}
+          <span className={`text-[10px] font-normal px-2 py-0.5 rounded-full border ${pid ? "bg-emerald-50 border-emerald-100 text-emerald-900" : "bg-rose-50 border-rose-100 text-rose-600"}`}>
             {pid || "NO ID"}
           </span>
         </div>
@@ -144,43 +254,46 @@ export default function MatchList({
           {pastCount > 0 && (
             <button
               onClick={() => setShowAll(!showAll)}
-              className={`rounded-xl px-4 py-2 text-xs font-black transition-all ${
-                showAll ? "bg-slate-200 text-slate-700" : "btn-primary px-6 py-2"
+              className={`rounded-xl px-4 py-2 text-xs font-medium transition-all ${
+                showAll ? "bg-slate-100 text-slate-500" : "bg-slate-500/5 backdrop-blur-sm text-slate-600 px-6 py-2 border border-slate-200/50 hover:bg-slate-500/10"
               }`}
             >
               {showAll ? "Скрыть прошедшие" : `Архив (+${pastCount})`}
             </button>
           )}
-          <div className="rounded-xl bg-slate-50 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-slate-900 border border-slate-200">
+          <div className="rounded-xl bg-slate-50 px-3 py-2 text-[10px] font-medium uppercase tracking-widest text-slate-900 border border-slate-200">
             {showAll ? "Full List" : "Upcoming"}
           </div>
         </div>
 
-        <SyncMatchesButton 
-          selectedIds={Array.from(selectedIds)} 
-          disciplineSlug={disciplineSlug} 
-          onSuccess={() => window.location.reload()}
-        />
       </div>
 
       <div className="mb-4 flex items-center justify-between px-2">
         {displayMatches.length > 0 && (
-          <label className="flex items-center gap-2.5 cursor-pointer text-[10px] font-black uppercase tracking-[0.2em] text-slate-900 hover:text-indigo-600 transition-colors">
-            <input
-              type="checkbox"
-              checked={allSelected}
-              onChange={toggleAll}
-              className="h-4 w-4 rounded-md border-slate-300 text-indigo-600 focus:ring-indigo-500"
-            />
+          <div 
+            onClick={toggleAll}
+            className="flex items-center gap-2.5 cursor-pointer text-[10px] font-medium uppercase tracking-[0.2em] text-slate-900 hover:text-emerald-600 transition-colors group/all"
+          >
+            <div className={`h-4 w-4 rounded border transition-all flex items-center justify-center ${
+              allSelected 
+                ? "bg-emerald-500/5 border-emerald-500/20" 
+                : "bg-white border-slate-200"
+            }`}>
+              {allSelected && (
+                <svg className="h-2.5 w-2.5 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={4}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+              )}
+            </div>
             Выбрать все
-          </label>
+          </div>
         )}
       </div>
 
       {displayMatches.length === 0 ? (
         <div className="rounded-3xl border-2 border-dashed border-slate-200 p-12 text-center bg-white/50">
-          <p className="text-sm font-black text-slate-400">Нет предстоящих матчей.</p>
-          <button onClick={() => setShowAll(true)} className="mt-4 text-xs font-black uppercase tracking-widest text-indigo-600 hover:underline">
+          <p className="text-sm font-medium text-slate-400">Нет предстоящих матчей.</p>
+          <button onClick={() => setShowAll(true)} className="mt-4 text-xs font-medium uppercase tracking-widest text-slate-600 hover:underline">
             Показать архив
           </button>
         </div>
@@ -191,47 +304,47 @@ export default function MatchList({
             const isPast = ts ? ts <= now : false;
             const isConflict = match.rawText?.includes("CONFLICT");
             const isReady = isMatchReady(match);
-            const isSynced = !!match.syncedAt;
+            const isSynced = !!match.syncedAt || isMatchInHistory(match);
+            const isSelected = selectedIds.has(match.id);
             
             return (
               <div
                 key={match.id}
-                className={`group relative flex flex-col rounded-[2rem] border border-slate-200 p-6 transition-all hover:border-indigo-200 hover:shadow-xl ${
+                className={`group relative flex flex-col rounded-[2.5rem] border border-slate-200 p-8 transition-all hover:border-slate-300 hover:shadow-2xl ${
                   isPast ? "bg-slate-50 opacity-80" : "bg-white"
-                } ${isConflict ? "border-amber-300 bg-amber-50" : ""} ${isSynced ? "ring-2 ring-indigo-500/20" : ""}`}
+                } ${isConflict ? "border-amber-300 bg-amber-50" : ""} ${isSynced ? "ring-2 ring-slate-800/10" : ""}`}
               >
                 <div className="flex items-center justify-between">
                   {/* Meta / IDs */}
                   <div className="flex flex-wrap items-center gap-3">
-                     <div className={`h-2 w-2 rounded-full ${isReady ? "bg-green-500" : "bg-rose-500"}`} />
-                     <div className="flex items-center gap-1.5">
-                       <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">LP ID:</span>
-                       <span className="text-[10px] font-black text-slate-900 tabular-nums">{match.lpNumericalId || "Generating..."}</span>
-                     </div>
-                     <div className="h-3 w-px bg-slate-100" />
-                     <div className="flex items-center gap-1.5">
-                       <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">MATCH ID:</span>
-                       <span className="text-[10px] font-bold text-slate-500 tabular-nums truncate">{match.matchId.split('_').pop()}</span>
-                     </div>
+                     <div className={`h-2.5 w-2.5 rounded-full ${isReady ? "bg-emerald-500" : "bg-rose-500 shadow-lg shadow-rose-200"}`} />
                      {match.platformId && (
                        <>
                          <div className="h-3 w-px bg-slate-100" />
-                         <div className="flex items-center gap-1.5">
-                           <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Platform ID:</span>
-                           <span className="text-[10px] font-black text-indigo-600 tabular-nums">{match.platformId}</span>
+                         <div className="flex items-center gap-2">
+                           <span className="text-[10px] font-medium text-slate-400 uppercase tracking-widest">Platform ID:</span>
+                           <span className="text-[10px] font-normal px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-100 text-emerald-900 tabular-nums">{match.platformId}</span>
                          </div>
                        </>
                      )}
                   </div>
 
                   <div className="flex items-center gap-4">
-                    <span className="text-sm font-black text-slate-950 tabular-nums">{formatMoscowDate(match)}</span>
-                    <input
-                      type="checkbox"
-                      checked={selectedIds.has(match.id)}
-                      onChange={() => toggleOne(match.id)}
-                      className="h-6 w-6 cursor-pointer rounded-lg border-slate-300 text-indigo-600 focus:ring-indigo-500 transition-transform group-hover:scale-110 shadow-sm"
-                    />
+                    <span className="text-base font-medium text-slate-900 tabular-nums tracking-tight">{formatMoscowDate(match)}</span>
+                    <div 
+                      onClick={() => toggleOne(match.id)}
+                      className={`h-6 w-6 cursor-pointer rounded-lg border transition-all flex items-center justify-center hover:scale-105 active:scale-95 ${
+                        isSelected 
+                          ? "bg-emerald-500/5 border-emerald-500/20 backdrop-blur-sm" 
+                          : "bg-white border-slate-100"
+                      }`}
+                    >
+                      {isSelected && (
+                        <svg className="h-3.5 w-3.5 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={4}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                        </svg>
+                      )}
+                    </div>
                   </div>
                 </div>
 
@@ -241,11 +354,11 @@ export default function MatchList({
                     <TeamDisplay name={match.teamAName} side="left" />
                   </div>
                   
-                  <div className="flex flex-col items-center gap-2 shrink-0">
-                    <div className="rounded-full bg-slate-100 px-3 py-1 text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">VS</div>
+                  <div className="flex flex-col items-center gap-3 shrink-0">
+                    <div className="rounded-full bg-slate-50 border border-slate-200 px-4 py-1.5 text-[9px] font-medium text-slate-400 uppercase tracking-[0.3em]">VS</div>
                     {(match.scoreA != null || match.scoreB != null) && (
-                      <div className={`text-3xl font-black tabular-nums tracking-tighter ${isConflict ? "text-amber-600" : "text-slate-950"}`}>
-                        {match.scoreA ?? "0"} <span className="text-slate-300">:</span> {match.scoreB ?? "0"}
+                      <div className={`text-4xl font-medium tabular-nums tracking-tighter ${isConflict ? "text-amber-600" : "text-slate-900"}`}>
+                        {match.scoreA ?? "0"} <span className="text-slate-200">:</span> {match.scoreB ?? "0"}
                       </div>
                     )}
                   </div>
@@ -256,15 +369,15 @@ export default function MatchList({
                 </div>
 
                 <div className="mt-4 flex items-center justify-between">
-                   <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                   <div className="text-[10px] font-normal text-slate-400 uppercase tracking-widest">
                      {match.stage} {match.round ? `• ${match.round}` : ""}
                    </div>
-                   {isSynced && (
-                     <div className="flex items-center gap-1.5 rounded-full bg-indigo-600 px-3 py-1 text-[10px] font-black text-white uppercase tracking-widest">
-                       <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 20 20"><path d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" /></svg>
-                       Synced
-                     </div>
-                   )}
+                    {isSynced && (
+                      <div className="flex items-center gap-1.5 rounded-full bg-emerald-500/5 backdrop-blur-sm px-3 py-1 text-[10px] font-medium text-emerald-600 border border-emerald-500/20 shadow-sm">
+                        <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+                        ЗАЛИТ
+                      </div>
+                    )}
                 </div>
               </div>
             );

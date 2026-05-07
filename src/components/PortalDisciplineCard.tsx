@@ -41,7 +41,7 @@ export default function PortalDisciplineCard({ slug, name, iconUrl, bgUrl, tourn
               className="h-full w-full object-contain" 
             />
           </div>
-          <h2 className="text-3xl font-black uppercase tracking-tighter text-slate-900 drop-shadow-sm">{name}</h2>
+          <h2 className="text-3xl font-black tracking-tighter text-slate-900 drop-shadow-sm">{name}</h2>
         </div>
       </div>
 

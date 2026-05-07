@@ -24,7 +24,8 @@ services:
       DATABASE_URL: postgresql://liquipedia:liquipedia@postgres:5432/liquipedia?schema=public
       LIQUIPEDIA_USER_AGENT: "liquipedia-local-docker/0.1 (local development; contact@example.com)"
       PORT: 3010
-      # Optional: you can override other env vars here if needed
+    volumes:
+      - ./certs:/app/certs:ro
     depends_on:
       - postgres
 

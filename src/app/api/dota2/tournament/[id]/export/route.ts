@@ -84,6 +84,24 @@ export async function GET(request: Request, { params }: { params: { id: string }
     };
   });
 
+  if (format === "php") {
+    const { buildFixtPayload } = await import("@/lib/adminUpload/buildFixtPayload");
+    const { phpSerialize: serialize } = await import("@/lib/adminUpload/phpSerialize");
+    const { payload } = await buildFixtPayload(params.id, "dota2");
+    
+    if (!payload) {
+      return NextResponse.json({ error: "Could not build PHP payload. Check if Shapka ID and Sport ID are set and team mappings exist." }, { status: 400 });
+    }
+
+    const serialized = serialize(payload);
+    return new Response(serialized, {
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Content-Disposition": `attachment; filename="${filenameBase}.php.txt"`
+      }
+    });
+  }
+
   if (format === "csv") {
     // Note: exporters might need update but for now using the tournament object with injected formatted data
     const csv = type === "participants" 

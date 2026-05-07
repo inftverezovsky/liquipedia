@@ -2,8 +2,8 @@ import { notFound } from "next/navigation";
 import LoadTournamentButton from "@/components/LoadTournamentButton";
 import StatusBadge from "@/components/StatusBadge";
 import TeamMappingPanel from "@/components/TeamMappingPanel";
-import MatchList from "@/components/MatchList";
-import TournamentPlatformIdPanel from "@/components/TournamentPlatformIdPanel";
+import ExportPanel from "@/components/ExportPanel";
+import TournamentAdminView from "@/components/TournamentAdminView";
 import { prisma } from "@/lib/db";
 import { formatDateTime } from "@/lib/format";
 import { isPlaceholderTeam } from "@/lib/teams";
@@ -79,37 +79,11 @@ export default async function TournamentPage({ params }: { params: { id: string 
         </div>
       </section>
 
-      <div className="grid gap-6 lg:grid-cols-[1fr_400px]">
-        <div className="space-y-6">
-          <section className="rounded-3xl bg-white p-6 shadow-soft ring-1 ring-slate-200">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-4 mb-4">
-              <h2 className="text-xl font-bold text-slate-950">Расписание и результаты</h2>
-              <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">{tournament.matches.length}</span>
-            </div>
-            <MatchList 
-              matches={tournament.matches.map(m => ({
-                ...m,
-                lpNumericalId: m.lpNumericalId ? m.lpNumericalId.toString() : null
-              }))} 
-              mappings={mappingMap} 
-              disciplineSlug="valorant" 
-            />
-          </section>
-        </div>
-        <div className="space-y-6">
-          <section className="rounded-3xl bg-white p-6 shadow-soft ring-1 ring-slate-200">
-            <h2 className="text-lg font-bold text-slate-950 mb-4">Настройки платформы</h2>
-            <TournamentPlatformIdPanel tournamentId={tournament.id} initialPlatformId={tournament.platformId} disciplineSlug="valorant" />
-          </section>
-          <section className="rounded-3xl bg-slate-50 p-6 ring-1 ring-slate-200">
-            <h2 className="text-sm font-bold uppercase tracking-wider text-slate-500 mb-4">Экспорт данных</h2>
-            <div className="grid grid-cols-2 gap-2">
-              <a className="flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-bold text-slate-700 hover:bg-slate-50 transition" href={`/api/valorant/tournament/${tournament.id}/export?format=json`}>JSON</a>
-              <a className="flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-bold text-slate-700 hover:bg-slate-50 transition" href={`/api/valorant/tournament/${tournament.id}/export?format=csv&type=matches`}>CSV</a>
-            </div>
-          </section>
-        </div>
-      </div>
+      <TournamentAdminView 
+        tournament={tournament} 
+        mappingMap={mappingMap} 
+        disciplineSlug="valorant" 
+      />
 
       <section className="rounded-3xl bg-white p-8 shadow-soft ring-1 ring-slate-200">
         <details className="group">
@@ -128,13 +102,6 @@ export default async function TournamentPage({ params }: { params: { id: string 
         </details>
       </section>
 
-      <section className="rounded-3xl bg-slate-950 p-8 text-white">
-        <h2 className="text-lg font-bold mb-4">Техническая информация</h2>
-        <details className="rounded-2xl bg-white/5 border border-white/10 p-4">
-          <summary className="cursor-pointer text-sm font-bold text-slate-400 hover:text-white transition">Показать Raw Wikitext</summary>
-          <pre className="mt-6 max-h-[500px] overflow-auto text-[10px] leading-relaxed text-slate-400 font-mono scrollbar-hide">{rawSnapshot?.rawWikitext ?? "Нет данных"}</pre>
-        </details>
-      </section>
     </div>
   );
 }

@@ -26,3 +26,17 @@ scratch/
 # Database
 prisma/dev.db
 prisma/dev.db-journal
+
+# Certificates and Secrets
+certs/*
+!certs/.gitkeep
+*.pem
+*.crt
+*.key
+*.p12
+*.pfx
+.env
+.env.local
+.env.production
+.env.development
+.env.*.local

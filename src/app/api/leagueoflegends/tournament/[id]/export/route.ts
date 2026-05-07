@@ -62,6 +62,24 @@ export async function GET(request: Request, { params }: { params: { id: string }
     };
   });
 
+  if (format === "php") {
+    const { buildFixtPayload } = await import("@/lib/adminUpload/buildFixtPayload");
+    const { phpSerialize: serialize } = await import("@/lib/adminUpload/phpSerialize");
+    const { payload } = await buildFixtPayload(params.id, "leagueoflegends");
+    
+    if (!payload) {
+      return NextResponse.json({ error: "Could not build PHP payload. Check if Shapka ID and Sport ID are set and team mappings exist." }, { status: 400 });
+    }
+
+    const serialized = serialize(payload);
+    return new Response(serialized, {
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Content-Disposition": `attachment; filename="${filenameBase}.php.txt"`
+      }
+    });
+  }
+
   if (format === "csv") {
     const csv = type === "participants" 
       ? participantsToCsv({ ...tournament, matches: formattedMatches as any }) 

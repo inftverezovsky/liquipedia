@@ -8,6 +8,8 @@ type PortalTournament = {
   url: string;
   dates: string;
   status: "ongoing" | "upcoming" | "completed";
+  dbStatus?: 'not_loaded' | 'announcements' | 'ready' | 'synced';
+  dbId?: string;
 };
 
 type PortalData = {
@@ -48,7 +50,7 @@ export default function UpcomingTournamentsWidget({ disciplineSlug }: { discipli
       <div className="p-6 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
         <div>
           <h2 className="text-base font-black tracking-tight text-slate-950 uppercase">Актуальные Турниры</h2>
-          <p className="text-[10px] font-bold text-slate-500 mt-1 uppercase tracking-widest">Текущие и ближайшие (до 5 дней)</p>
+          <p className="text-[10px] font-bold text-slate-500 mt-1 uppercase tracking-widest">Текущие и ближайшие (до 14 дней)</p>
         </div>
         <button
           onClick={() => fetchTournaments(true)}
@@ -74,7 +76,19 @@ export default function UpcomingTournamentsWidget({ disciplineSlug }: { discipli
                 <div className="flex justify-between items-start gap-4">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 mb-1">
-                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${t.status === "ongoing" ? "bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.5)]" : "bg-indigo-500"}`} />
+                      {t.dbStatus === 'synced' ? (
+                        <div className="flex h-4 w-4 items-center justify-center rounded-full bg-emerald-500/10 border border-emerald-500/20">
+                          <svg className="h-2.5 w-2.5 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={4}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                          </svg>
+                        </div>
+                      ) : (
+                        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                          t.dbStatus === 'ready' ? "bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.5)]" :
+                          t.dbStatus === 'announcements' ? "bg-slate-400" :
+                          "bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.5)]"
+                        }`} />
+                      )}
                       <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 truncate">
                         {t.status === "ongoing" ? "Ongoing" : "Upcoming"}
                       </span>
@@ -90,10 +104,11 @@ export default function UpcomingTournamentsWidget({ disciplineSlug }: { discipli
                     Wiki
                   </a>
                   <LoadTournamentButton
-                    pageId={0} // We don't have pageId from portal, importer will use URL/title
+                    pageId={0}
                     title={t.title}
                     pageUrl={t.url}
                     disciplineSlug={disciplineSlug}
+                    initialTournamentId={t.dbId}
                   />
                 </div>
               </li>

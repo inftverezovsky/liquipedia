@@ -503,11 +503,11 @@ function dedupeMatches(matches: NormalizedMatch[]): NormalizedMatch[] {
       continue;
     }
 
-    // Also check by team pair + date + stage
+    // Also check by team pair + precise date/time + stage
     const pairKey = [
       match.teamAName?.toLowerCase(),
       match.teamBName?.toLowerCase(),
-      match.matchDate?.toISOString().slice(0, 10),
+      match.matchDate?.getTime() ?? match.matchDateTime ?? "",
       match.stage
     ].join("|");
 
@@ -515,7 +515,7 @@ function dedupeMatches(matches: NormalizedMatch[]): NormalizedMatch[] {
       const k = [
         m.teamAName?.toLowerCase(),
         m.teamBName?.toLowerCase(),
-        m.matchDate?.toISOString().slice(0, 10),
+        m.matchDate?.getTime() ?? m.matchDateTime ?? "",
         m.stage
       ].join("|");
       return k === pairKey;
@@ -551,15 +551,16 @@ function createStableMatchId(input: {
   round?: string | null;
   extraHint?: string | null;
 }): string {
+  // Try to use a more stable tournament key by removing sub-page suffixes
+  const tournamentKey = input.sourceTitle.split('/')[0].trim();
+  
   const data = [
-    input.sourceTitle,
-    input.matchDate?.toISOString() ?? "",
-    input.matchDateTime ?? "",
+    tournamentKey,
+    input.matchDate?.getTime() ?? "", // Use timestamp instead of full ISO string which might vary
     input.teamAId ?? "unknownA",
     input.teamBId ?? "unknownB",
     input.stage ?? "",
-    input.round ?? "",
-    input.extraHint ?? ""
+    input.round ?? ""
   ].join("|");
   const hash = createHash("md5").update(data).digest("hex").slice(0, 12);
   return `match_${hash}`;

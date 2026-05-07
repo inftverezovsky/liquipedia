@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import LoadTournamentButton from "@/components/LoadTournamentButton";
 
 type PortalTournament = {
@@ -21,7 +21,7 @@ export default function UpcomingTournamentsWidget({ disciplineSlug }: { discipli
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchTournaments = async (forceRefresh = false) => {
+  const fetchTournaments = useCallback(async (forceRefresh = false) => {
     setLoading(true);
     setError(null);
     try {
@@ -36,12 +36,12 @@ export default function UpcomingTournamentsWidget({ disciplineSlug }: { discipli
     } finally {
       setLoading(false);
     }
-  };
+  }, [disciplineSlug]);
 
   // Load automatically on mount
   useEffect(() => {
     fetchTournaments();
-  }, [disciplineSlug]);
+  }, [fetchTournaments]);
 
   return (
     <aside className="premium-card h-fit flex flex-col bg-white border-slate-200 shadow-sm overflow-hidden">

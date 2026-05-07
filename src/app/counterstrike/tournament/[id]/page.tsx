@@ -100,7 +100,14 @@ export default async function TournamentPage({ params }: { params: { id: string 
                 {tournament.matches.length}
               </span>
             </div>
-            <MatchList matches={tournament.matches} mappings={mappingMap} disciplineSlug="counterstrike" />
+            <MatchList 
+              matches={tournament.matches.map(m => ({
+                ...m,
+                lpNumericalId: m.lpNumericalId ? m.lpNumericalId.toString() : null
+              }))} 
+              mappings={mappingMap} 
+              disciplineSlug="counterstrike" 
+            />
           </section>
         </div>
 

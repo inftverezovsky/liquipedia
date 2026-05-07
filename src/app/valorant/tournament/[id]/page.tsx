@@ -86,7 +86,14 @@ export default async function TournamentPage({ params }: { params: { id: string 
               <h2 className="text-xl font-bold text-slate-950">Расписание и результаты</h2>
               <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">{tournament.matches.length}</span>
             </div>
-            <MatchList matches={tournament.matches} mappings={mappingMap} disciplineSlug="valorant" />
+            <MatchList 
+              matches={tournament.matches.map(m => ({
+                ...m,
+                lpNumericalId: m.lpNumericalId ? m.lpNumericalId.toString() : null
+              }))} 
+              mappings={mappingMap} 
+              disciplineSlug="valorant" 
+            />
           </section>
         </div>
         <div className="space-y-6">

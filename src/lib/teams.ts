@@ -14,8 +14,7 @@ export function generateInternalTeamId(name: string): string {
     .replace(/\{\{[^}]+\}\}/g, '') // remove wiki templates {{Flag|...}}
     .toLowerCase()
     .trim()
-    .replace(/\s+/g, '_') // spaces to underscores (user asked for hyphens, but team_team-spirit looks okay, wait, user said "replace spaces with hyphens")
-    .replace(/\s+/g, '-') 
+    .replace(/\s+/g, '-') // spaces to hyphens
     .replace(/[^a-z0-9-]/g, '') // remove unsafe chars
     .replace(/-+/g, '-') // remove double hyphens
     .replace(/^-+|-+$/g, ''); // trim hyphens

@@ -210,8 +210,8 @@ export default function MatchList({
                      </div>
                      <div className="h-3 w-px bg-slate-100" />
                      <div className="flex items-center gap-1.5">
-                       <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Admin ID:</span>
-                       <span className="text-[10px] font-bold text-slate-500 tabular-nums truncate">Поиск...</span>
+                       <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">MATCH ID:</span>
+                       <span className="text-[10px] font-bold text-slate-500 tabular-nums truncate">{match.matchId.split('_').pop()}</span>
                      </div>
                      {match.platformId && (
                        <>

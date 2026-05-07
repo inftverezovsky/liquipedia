@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { PortalTournament } from "@/lib/liquipedia/portal";
@@ -21,15 +22,24 @@ export default function PortalDisciplineCard({ slug, name, iconUrl, bgUrl, tourn
     <div className="group relative flex flex-col overflow-hidden rounded-[2rem] bg-white border border-slate-200 shadow-sm transition-all hover:shadow-md">
       {/* Cinematic Header */}
       <div className="relative h-48 w-full overflow-hidden">
-        <img 
+        <Image 
           src={bgUrl} 
           alt={name} 
+          fill
+          unoptimized
           className="h-full w-full object-cover grayscale-[0.2] transition-transform duration-700 group-hover:scale-105"
         />
         <div className="absolute inset-0 bg-gradient-to-t from-white via-white/20 to-transparent" />
         <div className="absolute bottom-6 left-8 flex items-center gap-4">
           <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-white p-2 shadow-lg ring-1 ring-slate-100">
-            <img src={iconUrl} alt={name} className="h-full w-full object-contain" />
+            <Image 
+              src={iconUrl} 
+              alt={name} 
+              width={48} 
+              height={48} 
+              unoptimized
+              className="h-full w-full object-contain" 
+            />
           </div>
           <h2 className="text-3xl font-black uppercase tracking-tighter text-slate-900 drop-shadow-sm">{name}</h2>
         </div>

@@ -243,18 +243,34 @@ export default function AdminUploadPanel({
         </div>
 
         {result && (
-          <div className={`mt-8 p-6 rounded-2xl text-xs font-normal animate-in slide-in-from-top-2 ${
-            result.type === 'success' ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' : 
-            result.type === 'error' ? 'bg-rose-50 text-rose-700 border border-rose-100' : 'bg-blue-50 text-blue-700'
+          <div className={`mt-8 p-6 rounded-2xl animate-in slide-in-from-top-2 border ${
+            result.type === 'success' ? 'bg-emerald-50/50 text-emerald-900 border-emerald-100' : 
+            result.type === 'error' ? 'bg-rose-50/50 text-rose-900 border-rose-100' : 'bg-blue-50/50 text-blue-900 border-blue-100'
           }`}>
-            <div className="flex items-center gap-2 mb-2">
-               <span className="text-lg">{result.type === 'success' ? '✓' : '⚠'}</span>
-               <p className="text-sm">{result.text}</p>
+            <div className="flex items-center gap-3">
+               <div className={`h-8 w-8 rounded-full flex items-center justify-center shrink-0 ${
+                 result.type === 'success' ? 'bg-emerald-100 text-emerald-600' : 
+                 result.type === 'error' ? 'bg-rose-100 text-rose-600' : 'bg-blue-100 text-blue-600'
+               }`}>
+                 <span className="text-lg font-black">{result.type === 'success' ? '✓' : '!'}</span>
+               </div>
+               <p className="text-sm font-bold tracking-tight">{result.text}</p>
             </div>
+            
             {result.raw && (
-              <pre className="mt-4 p-4 bg-white/50 rounded-xl overflow-auto max-h-40 text-[10px] font-mono border border-white">
-                {result.raw}
-              </pre>
+              <details className="mt-4 group">
+                <summary className="cursor-pointer text-[10px] font-bold text-slate-400 uppercase tracking-widest hover:text-slate-600 transition-colors list-none flex items-center gap-2">
+                  <svg className="h-3 w-3 group-open:rotate-90 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M9 5l7 7-7 7" />
+                  </svg>
+                  Технические подробности
+                </summary>
+                <div className="mt-3">
+                  <pre className="p-4 bg-white border border-slate-100 rounded-xl overflow-auto max-h-40 text-[9px] font-mono leading-relaxed text-slate-400">
+                    {result.raw}
+                  </pre>
+                </div>
+              </details>
             )}
           </div>
         )}
@@ -301,44 +317,47 @@ export default function AdminUploadPanel({
               </details>
             )}
 
-            <div className="space-y-4 pt-4">
-               <div className="flex items-center gap-2 text-[10px] font-medium uppercase tracking-widest text-slate-400">
-                  <div className="h-px flex-1 bg-slate-100" />
-                  Technical Details
-                  <div className="h-px flex-1 bg-slate-100" />
-               </div>
-
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="text-[9px] font-medium uppercase tracking-widest text-slate-400">PHP Array Equiv</label>
-                  <button onClick={() => navigator.clipboard.writeText(toPhpString(preview.phpArray))} className="text-[9px] font-medium text-slate-600 hover:underline text-slate-600">Copy PHP</button>
-                </div>
-                <pre className="p-4 bg-slate-900 text-slate-200/50 text-[10px] rounded-2xl overflow-auto max-h-80 font-mono leading-relaxed scrollbar-hide">
-                  {toPhpString(preview.phpArray)}
-                </pre>
-              </div>
-
-              <div className="grid gap-4 sm:grid-cols-2">
+            <details className="group pt-4">
+              <summary className="cursor-pointer flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-slate-400 hover:text-slate-600 transition-colors list-none">
+                <svg className="h-4 w-4 group-open:rotate-90 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M9 5l7 7-7 7" />
+                </svg>
+                Технические подробности (Превью)
+              </summary>
+              
+              <div className="space-y-4 mt-6 animate-in fade-in slide-in-from-top-2">
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
-                    <label className="text-[9px] font-medium uppercase tracking-widest text-slate-400">Serialized</label>
-                    <button onClick={() => navigator.clipboard.writeText(preview.serialized)} className="text-[9px] font-medium text-slate-600 hover:underline text-slate-600">Copy</button>
+                    <label className="text-[9px] font-bold uppercase tracking-widest text-slate-400">PHP Array Equiv</label>
+                    <button onClick={() => navigator.clipboard.writeText(toPhpString(preview.phpArray))} className="text-[9px] font-bold text-slate-600 hover:underline">Copy PHP</button>
                   </div>
-                  <div className="p-3 bg-slate-50 border border-slate-200 text-slate-500 text-[9px] rounded-xl font-mono break-all max-h-24 overflow-auto scrollbar-hide">
-                    {preview.serialized}
-                  </div>
+                  <pre className="p-4 bg-slate-900 text-slate-200/50 text-[10px] rounded-2xl overflow-auto max-h-80 font-mono leading-relaxed scrollbar-hide">
+                    {toPhpString(preview.phpArray)}
+                  </pre>
                 </div>
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <label className="text-[9px] font-medium uppercase tracking-widest text-slate-400">Post Body</label>
-                    <button onClick={() => navigator.clipboard.writeText(preview.postBody)} className="text-[9px] font-medium text-slate-600 hover:underline text-slate-600">Copy</button>
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[9px] font-bold uppercase tracking-widest text-slate-400">Serialized</label>
+                      <button onClick={() => navigator.clipboard.writeText(preview.serialized)} className="text-[9px] font-bold text-slate-600 hover:underline">Copy</button>
+                    </div>
+                    <div className="p-3 bg-slate-50 border border-slate-200 text-slate-500 text-[9px] rounded-xl font-mono break-all max-h-24 overflow-auto scrollbar-hide">
+                      {preview.serialized}
+                    </div>
                   </div>
-                  <div className="p-3 bg-slate-50 border border-slate-200 text-slate-500 text-[9px] rounded-xl font-mono break-all max-h-24 overflow-auto scrollbar-hide">
-                    {preview.postBody}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[9px] font-bold uppercase tracking-widest text-slate-400">Post Body</label>
+                      <button onClick={() => navigator.clipboard.writeText(preview.postBody)} className="text-[9px] font-bold text-slate-600 hover:underline">Copy</button>
+                    </div>
+                    <div className="p-3 bg-slate-50 border border-slate-200 text-slate-500 text-[9px] rounded-xl font-mono break-all max-h-24 overflow-auto scrollbar-hide">
+                      {preview.postBody}
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
+            </details>
           </div>
         )}
       </section>

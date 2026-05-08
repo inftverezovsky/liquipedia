@@ -375,7 +375,6 @@ async function processSinglePage(params: {
            }).catch(() => {});
         }
       }));
-      }));
     }
   }
 

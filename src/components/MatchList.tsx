@@ -92,7 +92,8 @@ export default function MatchList({
     matches.forEach(m => {
       const tA = m.teamAName?.trim().toLowerCase() || "";
       const tB = m.teamBName?.trim().toLowerCase() || "";
-      if (tA === "tbd" && tB === "tbd") {
+      // Allow all TBD matches (numbered or generic) without deduplication by pair
+      if (isPlaceholderTeam(tA) || isPlaceholderTeam(tB)) {
         results.push(m);
         return;
       }
@@ -144,8 +145,11 @@ export default function MatchList({
   const now = Date.now();
   const upcomingMatches = useMemo(() => sortedMatches.filter((m) => {
     const ts = getMatchTimestamp(m);
+    // Keep placeholder matches (TBD) in upcoming even if their date is past
+    const isTbd = isPlaceholderTeam(m.teamAName) || isPlaceholderTeam(m.teamBName);
+    if (isTbd) return true;
+    
     if (!ts) return true;
-    // Keep matches that are upcoming or have no date
     return ts > now;
   }), [sortedMatches, now]);
 
@@ -226,8 +230,9 @@ export default function MatchList({
   }
 
   function TeamDisplay({ name, side }: { name: string | null; side: "left" | "right" }) {
-    const isTbd = !name || isPlaceholderTeam(name);
-    const effectiveName = isTbd ? "TBD" : name;
+    const isGenericTbd = !name || name.toLowerCase() === "tbd";
+    const isNumberedTbd = name ? /^tbd\d+$/i.test(name) : false;
+    const effectiveName = (isGenericTbd || isNumberedTbd) ? (name || "TBD") : name;
     const m = mappings[effectiveName];
     const alias = m?.alias;
     const pid = m?.platformId || "";

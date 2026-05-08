@@ -85,6 +85,7 @@ export type NormalizedParticipant = {
 
 export type NormalizedMatch = {
   matchId?: string | null;
+  lpNumericalId?: bigint | null;
   stage?: string | null;
   round?: string | null;
   matchDate?: Date | null;
@@ -387,15 +388,21 @@ export function stringToNumericalId(str: string): bigint {
 function createStableMatchId(input: { 
   sourceTitle: string; 
   matchDate?: Date | null; 
+  matchDateTime?: string | null;
   teamAId: string; 
   teamBId: string; 
+  stage?: string | null;
+  round?: string | null;
   extraHint: string 
 }): string {
   const data = [
     input.sourceTitle, 
     input.matchDate?.toISOString() ?? "", 
+    input.matchDateTime ?? "",
     input.teamAId, 
     input.teamBId, 
+    input.stage ?? "",
+    input.round ?? "",
     input.extraHint
   ].join("|");
   return `match_${createHash("md5").update(data).digest("hex").slice(0, 12)}`;

@@ -25,6 +25,7 @@ export type NormalizedParticipant = {
 
 export type NormalizedMatch = {
   matchId?: string | null;
+  lpNumericalId?: bigint | null;
   stage?: string | null;
   round?: string | null;
   matchDate?: Date | null;

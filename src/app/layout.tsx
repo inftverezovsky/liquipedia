@@ -27,7 +27,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <Navbar />
 
               <div className="flex items-center gap-3">
-                <div className="h-2 w-2 rounded-full bg-indigo-500 shadow-[0_0_8px_rgba(79,70,229,0.5)]" />
+                <div className="h-2 w-2 rounded-full bg-indigo-50 shadow-[0_0_8px_rgba(79,70,229,0.5)]" />
                 <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Stable</span>
               </div>
             </div>

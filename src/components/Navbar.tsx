@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { motion } from "framer-motion";
 
 const navItems = [
   { href: "/", label: "Главная" },
@@ -19,7 +20,7 @@ export default function Navbar() {
   return (
     <nav className="hidden items-center gap-1 md:flex">
       {navItems.map((item) => {
-        const isActive = pathname === item.href;
+        const isActive = pathname === item.href || (item.href !== "/" && pathname.startsWith(item.href));
         return (
           <Link
             key={item.href}
@@ -27,15 +28,22 @@ export default function Navbar() {
             className={`relative rounded-lg px-4 py-2 text-sm font-bold transition-all duration-300 ${
               isActive 
                 ? 'text-indigo-600' 
-                : 'text-slate-600 hover:bg-slate-100 hover:text-indigo-600'
+                : 'text-slate-600 hover:text-indigo-600'
             }`}
           >
-            {item.label}
+            <span className="relative z-10">{item.label}</span>
             {isActive && (
-              <div className="absolute inset-0 z-[-1] rounded-lg bg-indigo-50 shadow-[0_0_15px_rgba(79,70,229,0.1)] ring-1 ring-indigo-500/20" />
+              <motion.div 
+                layoutId="navbar-active"
+                className="absolute inset-0 z-0 rounded-lg bg-indigo-50 ring-1 ring-indigo-500/20 shimmer" 
+                transition={{ type: "spring", stiffness: 380, damping: 30 }}
+              />
             )}
             {isActive && (
-              <div className="absolute bottom-1 left-1/2 h-1 w-4 -translate-x-1/2 rounded-full bg-indigo-600 shadow-[0_0_8px_rgba(79,70,229,0.5)]" />
+              <motion.div 
+                layoutId="navbar-underline"
+                className="absolute bottom-1 left-1/2 h-1 w-4 -translate-x-1/2 rounded-full bg-indigo-600 shadow-[0_0_8px_rgba(79,70,229,0.5)]" 
+              />
             )}
           </Link>
         );

@@ -56,19 +56,19 @@ export default async function TournamentPage({ params }: { params: { id: string 
   return (
     <div className="space-y-8 animate-in">
       {/* Header section */}
-      <section className="rounded-3xl border border-slate-200 bg-white p-8 lg:p-12 shadow-sm">
+      <section className="premium-card">
         <div className="flex flex-col gap-8 lg:flex-row lg:items-start lg:justify-between">
           <div className="max-w-4xl">
             <div className="flex items-center gap-3">
-              <span className="rounded-lg bg-slate-500/5 backdrop-blur-sm px-3 py-1 text-[10px] font-medium uppercase tracking-widest text-slate-600 border border-slate-200/50">
+              <span className="rounded-lg bg-indigo-500/10 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-indigo-600 border border-indigo-200/50">
                 Dota 2
               </span>
               <StatusBadge status={tournament.extractionStatus} />
             </div>
-            <h1 className="mt-4 text-4xl font-medium tracking-tight text-slate-900 sm:text-5xl">
+            <h1 className="mt-4 text-4xl font-bold tracking-tight sm:text-6xl gradient-text">
               {tournament.name}
             </h1>
-            <div className="mt-6 flex flex-wrap items-center gap-6 text-sm font-normal text-slate-500">
+            <div className="mt-6 flex flex-wrap items-center gap-6 text-sm font-bold text-slate-400">
               <a href={tournament.sourceUrl} target="_blank" rel="noreferrer" className="flex items-center gap-2 hover:text-slate-900 transition-colors">
                 <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
                 Liquipedia

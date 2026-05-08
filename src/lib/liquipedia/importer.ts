@@ -106,19 +106,23 @@ export async function importTournamentRecursive(params: {
       m.matchId = `match_${hash}`;
       m.lpNumericalId = BigInt("0x" + hash.substring(0, 15)) % 9007199254740991n;
       m.tournamentId = mainResult.tournament.id;
-      // Also store a secondary key for even more aggressive day-level deduplication
-      (m as any)._dayTeamsKey = `${dateStr}|${teams[0]}|${teams[1]}`;
+      // CRITICAL FIX: Actually store the dateStr for use in deduplication loop
+      (m as any)._dateStr = dateStr;
     }
 
     // DEDUPLICATE internally before inserting
     const uniqueMatchesMap = new Map<string, any>();
     for (const m of allMatches) {
-      const dayKey = (m as any)._dayTeamsKey;
+      const datePart = (m as any)._dateStr || "no-date";
+      const teamA = (m.teamAId || "unknownA").toLowerCase().trim();
+      const teamB = (m.teamBId || "unknownB").toLowerCase().trim();
+      const teams = [teamA, teamB].sort();
+      const dedupeKey = `${datePart}|${teams[0]}|${teams[1]}`;
       
-      const existing = uniqueMatchesMap.get(dayKey);
+      const existing = uniqueMatchesMap.get(dedupeKey);
 
       if (!existing) {
-        uniqueMatchesMap.set(dayKey, m);
+        uniqueMatchesMap.set(dedupeKey, m);
       } else {
         // MERGE LOGIC: Keep the earlier match if times differ
         let preferred = existing;
@@ -129,18 +133,19 @@ export async function importTournamentRecursive(params: {
           preferred = m;
         }
         
-        uniqueMatchesMap.set(dayKey, {
+        uniqueMatchesMap.set(dedupeKey, {
           ...existing,
           ...m,
-          matchId: preferred.matchId,
+          matchId: preferred.matchId, // Keep the ID of the earlier one
           matchDate: preferred.matchDate || existing.matchDate,
           matchDateTime: preferred.matchDateTime || existing.matchDateTime,
-          platformId: existing.platformId || m.platformId
+          platformId: existing.platformId || m.platformId,
+          lpNumericalId: existing.lpNumericalId || m.lpNumericalId
         });
       }
     }
     const deduplicatedMatches = Array.from(uniqueMatchesMap.values()).map(m => {
-      const { _dayTeamsKey, ...rest } = m;
+      const { _dateStr, ...rest } = m;
       return rest;
     });
 

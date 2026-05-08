@@ -145,10 +145,20 @@ export default function MatchList({
   const now = Date.now();
   const upcomingMatches = useMemo(() => sortedMatches.filter((m) => {
     const ts = getMatchTimestamp(m);
-    // Keep placeholder matches (TBD) in upcoming even if their date is past
-    const isTbd = isPlaceholderTeam(m.teamAName) || isPlaceholderTeam(m.teamBName);
-    if (isTbd) return true;
     
+    const isNumberedTbd = (name: string | null) => name ? /^tbd\d+$/i.test(name) : false;
+    const isA_Numbered = isNumberedTbd(m.teamAName);
+    const isB_Numbered = isNumberedTbd(m.teamBName);
+    const isTbd = isPlaceholderTeam(m.teamAName) || isPlaceholderTeam(m.teamBName);
+
+    // 1. If it's a numbered TBD, it's a specific bracket slot. We keep it in Upcoming.
+    if (isA_Numbered || isB_Numbered) return true;
+
+    // 2. If it's a generic TBD (TBD vs TBD) and it's in the past, hide it from Upcoming.
+    // These are likely "ghost" matches from old imports or finished matches that didn't update.
+    if (isTbd && ts && ts <= now) return false;
+
+    // 3. For all other matches, standard future check
     if (!ts) return true;
     return ts > now;
   }), [sortedMatches, now]);

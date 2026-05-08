@@ -84,8 +84,8 @@ export async function buildFixtPayload(
     const platformIdA = mappingA?.platformId;
     const platformIdB = mappingB?.platformId;
 
-    const isMappedA = platformIdA && (mappingA.status === 'auto_mapped' || mappingA.status === 'manual_mapped');
-    const isMappedB = platformIdB && (mappingB.status === 'auto_mapped' || mappingB.status === 'manual_mapped');
+    const isMappedA = !!platformIdA;
+    const isMappedB = !!platformIdB;
 
     if (!isMappedA || !isMappedB) {
       const missing = [];

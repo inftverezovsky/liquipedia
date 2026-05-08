@@ -3,6 +3,7 @@
 import { SettingsPasswordGate } from "@/components/SettingsPasswordGate";
 
 import LiquipediaGlobalSettings from "@/components/LiquipediaGlobalSettings";
+import { AdminTeamImporter } from "@/components/AdminTeamImporter";
 
 export default function SettingsPage() {
   return (
@@ -20,7 +21,7 @@ export default function SettingsPage() {
 
         <LiquipediaGlobalSettings />
 
-
+        <AdminTeamImporter />
       </div>
     </SettingsPasswordGate>
   );

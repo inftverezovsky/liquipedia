@@ -108,14 +108,39 @@ export async function POST(request: Request) {
   try {
     const formData = await request.formData();
     const file = formData.get("file") as File;
+    const url = formData.get("url") as string;
     const disciplineSlug = (formData.get("disciplineSlug") as string) || "dota2";
 
-    if (!file) {
-      return NextResponse.json({ error: "No file provided" }, { status: 400 });
+    if (!file && !url) {
+      return NextResponse.json({ error: "No file or URL provided" }, { status: 400 });
     }
 
-    const bytes = await file.arrayBuffer();
-    const buffer = Buffer.from(bytes);
+    let buffer: Buffer;
+    let fileName: string;
+
+    if (file) {
+      const bytes = await file.arrayBuffer();
+      buffer = Buffer.from(bytes);
+      fileName = file.name;
+    } else {
+      let fetchUrl = url;
+      // Handle Google Sheets links
+      if (url.includes("docs.google.com/spreadsheets")) {
+        const match = url.match(/\/d\/(.+?)\//);
+        if (match) {
+          const id = match[1];
+          fetchUrl = `https://docs.google.com/spreadsheets/d/${id}/export?format=xlsx`;
+        }
+      }
+      
+      const response = await fetch(fetchUrl);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch from URL: ${response.statusText}`);
+      }
+      const bytes = await response.arrayBuffer();
+      buffer = Buffer.from(bytes);
+      fileName = "remote_url";
+    }
 
     const workbook = xlsx.read(buffer, { type: "buffer" });
     const firstSheetName = workbook.SheetNames[0];
@@ -123,7 +148,7 @@ export async function POST(request: Request) {
 
     const data: any[][] = xlsx.utils.sheet_to_json(worksheet, { header: 1 });
     if (data.length < 2) {
-      return NextResponse.json({ error: "File has no data" }, { status: 400 });
+      return NextResponse.json({ error: "Source has no data" }, { status: 400 });
     }
 
     const headers = data[0].map(String);
@@ -154,11 +179,11 @@ export async function POST(request: Request) {
       const normalizedName = normalizeTeamName(name);
 
       await prisma.adminTeam.upsert({
-        where: { id: `admin_${disciplineSlug}_${id}` }, // We need a unique ID for upsert
+        where: { id: `admin_${disciplineSlug}_${id}` },
         update: {
           platformName: name,
           normalizedName,
-          sourceFileName: file.name,
+          sourceFileName: fileName,
         },
         create: {
           id: `admin_${disciplineSlug}_${id}`,
@@ -166,7 +191,7 @@ export async function POST(request: Request) {
           platformId: id,
           platformName: name,
           normalizedName,
-          sourceFileName: file.name,
+          sourceFileName: fileName,
         },
       });
       importedCount++;

@@ -4,6 +4,8 @@ import React, { useState } from "react";
 
 export function AdminTeamImporter() {
   const [file, setFile] = useState<File | null>(null);
+  const [url, setUrl] = useState("");
+  const [importMode, setImportMode] = useState<"file" | "url">("file");
   const [discipline, setDiscipline] = useState("dota2");
   const [status, setStatus] = useState<"idle" | "uploading" | "success" | "error">("idle");
   const [result, setResult] = useState<any>(null);
@@ -16,13 +18,18 @@ export function AdminTeamImporter() {
   };
 
   const handleUpload = async () => {
-    if (!file) return;
+    if (importMode === "file" && !file) return;
+    if (importMode === "url" && !url) return;
 
     setStatus("uploading");
     setError(null);
 
     const formData = new FormData();
-    formData.append("file", file);
+    if (importMode === "file" && file) {
+      formData.append("file", file);
+    } else {
+      formData.append("url", url);
+    }
     formData.append("disciplineSlug", discipline);
 
     try {
@@ -56,13 +63,28 @@ export function AdminTeamImporter() {
       <div className="relative z-10">
         <p className="text-[10px] font-black uppercase tracking-[0.3em] text-indigo-600 mb-2">Database Tools</p>
         <h2 className="text-3xl font-black tracking-tighter text-slate-900 mb-6">
-          Импорт команд <span className="text-indigo-600">Excel.</span>
+          Импорт команд <span className="text-indigo-600">Excel / Google.</span>
         </h2>
         
         <p className="text-sm font-bold text-slate-600 mb-8 max-w-lg leading-relaxed">
           Загрузите список команд из административной системы для автоматического сопоставления. 
-          Файл должен содержать колонки с <span className="text-indigo-600">ID</span> и <span className="text-indigo-600">Названием</span> команды.
+          Файл или таблица должны содержать колонки с <span className="text-indigo-600">ID</span> и <span className="text-indigo-600">Названием</span> команды.
         </p>
+
+        <div className="flex gap-4 mb-8">
+          <button 
+            onClick={() => setImportMode("file")}
+            className={`px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${importMode === "file" ? "bg-indigo-600 text-white shadow-lg shadow-indigo-200" : "bg-white/50 text-slate-400 hover:bg-white"}`}
+          >
+            Файл (.xlsx)
+          </button>
+          <button 
+            onClick={() => setImportMode("url")}
+            className={`px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${importMode === "url" ? "bg-indigo-600 text-white shadow-lg shadow-indigo-200" : "bg-white/50 text-slate-400 hover:bg-white"}`}
+          >
+            Google Таблица / URL
+          </button>
+        </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
           <div className="space-y-2">
@@ -80,31 +102,43 @@ export function AdminTeamImporter() {
           </div>
 
           <div className="space-y-2">
-            <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 ml-4">Файл (.xlsx)</label>
-            <div className="relative h-14">
-              <input
-                type="file"
-                accept=".xlsx"
-                onChange={handleFileChange}
-                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20"
-              />
-              <div className="absolute inset-0 flex items-center px-6 bg-slate-50 border-2 border-slate-100 rounded-2xl text-sm font-bold text-slate-400 group-hover:border-indigo-200 transition-all pointer-events-none">
-                {file ? (
-                  <span className="text-slate-900 truncate">{file.name}</span>
-                ) : (
-                  "Выберите файл..."
-                )}
+            <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 ml-4">
+              {importMode === "file" ? "Файл (.xlsx)" : "Ссылка на таблицу"}
+            </label>
+            {importMode === "file" ? (
+              <div className="relative h-14">
+                <input
+                  type="file"
+                  accept=".xlsx"
+                  onChange={handleFileChange}
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20"
+                />
+                <div className="absolute inset-0 flex items-center px-6 bg-slate-50 border-2 border-slate-100 rounded-2xl text-sm font-bold text-slate-400 group-hover:border-indigo-200 transition-all pointer-events-none">
+                  {file ? (
+                    <span className="text-slate-900 truncate">{file.name}</span>
+                  ) : (
+                    "Выберите файл..."
+                  )}
+                </div>
               </div>
-            </div>
+            ) : (
+              <input
+                type="text"
+                placeholder="https://docs.google.com/spreadsheets/d/..."
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                className="w-full h-14 px-6 bg-slate-50 border-2 border-slate-100 rounded-2xl text-sm font-bold text-slate-950 focus:outline-none focus:border-indigo-500 transition-all"
+              />
+            )}
           </div>
         </div>
 
         <button
           onClick={handleUpload}
-          disabled={!file || status === "uploading"}
+          disabled={(importMode === "file" ? !file : !url) || status === "uploading"}
           className={`
             h-16 px-12 rounded-2xl font-black text-sm uppercase tracking-widest transition-all
-            ${!file || status === "uploading" 
+            ${(importMode === "file" ? !file : !url) || status === "uploading" 
               ? "bg-slate-100 text-slate-400 cursor-not-allowed" 
               : "bg-indigo-600 text-white shadow-xl shadow-indigo-200 hover:bg-indigo-700 hover:-translate-y-1 active:translate-y-0"
             }

@@ -49,7 +49,7 @@ export async function buildFixtPayload(
   const matches = await prisma.tournamentMatch.findMany({
     where: { 
       tournamentId,
-      id: matchIds ? { in: matchIds } : undefined
+      matchId: matchIds ? { in: matchIds } : undefined
     },
     orderBy: { matchDate: 'asc' },
   });

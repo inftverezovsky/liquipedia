@@ -117,14 +117,14 @@ export default function MatchList({
       });
   }, [matches]);
 
-  const allSelected = displayMatches.length > 0 && displayMatches.every(m => selectedIds.has(m.id));
+  const allSelected = displayMatches.length > 0 && displayMatches.every(m => selectedIds.has(m.matchId || "unknown"));
 
   function toggleAll() {
     const newIds = new Set(selectedIds);
     if (allSelected) {
-      displayMatches.forEach(m => newIds.delete(m.id));
+      displayMatches.forEach(m => newIds.delete(m.matchId || "unknown"));
     } else {
-      displayMatches.forEach(m => newIds.add(m.id));
+      displayMatches.forEach(m => newIds.add(m.matchId || "unknown"));
     }
     setSelectedIds(newIds);
   }
@@ -209,7 +209,7 @@ export default function MatchList({
             className="grid gap-4"
           >
             {displayMatches.map((match, idx) => {
-              const isSelected = selectedIds.has(match.id);
+              const isSelected = selectedIds.has(match.matchId || "unknown");
               
               return (
                 <motion.div
@@ -218,8 +218,8 @@ export default function MatchList({
                   animate={{ opacity: 1, y: 0 }}
                   whileHover={{ scale: 1.01, y: -2, transition: { duration: 0.2 } }}
                   transition={{ delay: idx * 0.02 }}
-                  key={match.id}
-                  onClick={() => toggleOne(match.id)}
+                  key={match.matchId || match.id}
+                  onClick={() => toggleOne(match.matchId || "unknown")}
                   className={`group relative flex flex-col rounded-[2rem] border p-6 transition-all cursor-pointer overflow-hidden bg-white ${
                     isSelected ? "border-indigo-600 ring-1 ring-indigo-600/10 glow-primary" : "border-slate-200 hover:border-indigo-300 hover:shadow-xl"
                   }`}

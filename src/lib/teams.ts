@@ -34,6 +34,9 @@ export function isPlaceholderTeam(name: string | null | undefined): boolean {
   
   // Bracket seeds (A1, B2, C12, etc.) - expanded range
   if (/^[a-h][1-9][0-9]?$/i.test(n)) return true;
+
+  // Numbered TBDs (TBD1, TBD2, etc.)
+  if (/^tbd\d+$/i.test(n)) return true;
   
   // Dynamic placeholders
   if (n.startsWith("winner of")) return true;

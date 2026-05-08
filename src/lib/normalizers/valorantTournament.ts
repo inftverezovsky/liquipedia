@@ -273,14 +273,49 @@ function extractMatchesFromWikitext(wikitext: string): NormalizedMatch[] {
 }
 
 function normalizeMatchCandidate(candidate: NormalizedMatch, sourceTitle: string, indexHint: string): NormalizedMatch | null {
-  const teamAName = candidate.teamAName?.trim() || "TBD";
-  const teamBName = candidate.teamBName?.trim() || "TBD";
-  const teamAId = generateInternalTeamId(teamAName);
-  const teamBId = generateInternalTeamId(teamBName);
+  const teamAName = candidate.teamAName?.trim() || null;
+  const teamBName = candidate.teamBName?.trim() || null;
 
-  const matchId = createStableMatchId({ sourceTitle, matchDate: candidate.matchDate, teamAId, teamBId, extraHint: indexHint });
+  if (!teamAName && !teamBName) return null;
 
-  return { ...candidate, matchId, teamAId, teamAName, teamBId, teamBName };
+  // Numbered TBD logic
+  const matchIdx = parseInt(indexHint || "0", 10);
+  const tbdAName = `TBD${(matchIdx * 2) + 1}`;
+  const tbdBName = `TBD${(matchIdx * 2) + 2}`;
+
+  const isA_TBD = !teamAName || isPlaceholderTeam(teamAName);
+  const isB_TBD = !teamBName || isPlaceholderTeam(teamBName);
+
+  const finalTeamAName = isA_TBD ? tbdAName : teamAName;
+  const finalTeamBName = isB_TBD ? tbdBName : teamBName;
+
+  const teamAId = isA_TBD ? `tbd_${tbdAName.toLowerCase()}` : generateInternalTeamId(teamAName!);
+  const teamBId = isB_TBD ? `tbd_${tbdBName.toLowerCase()}` : generateInternalTeamId(teamBName!);
+
+  const matchId = candidate.matchId ?? createStableMatchId({ 
+    sourceTitle, 
+    matchDate: candidate.matchDate, 
+    teamAId, 
+    teamBId, 
+    extraHint: indexHint 
+  });
+
+  const lpNumericalId = stringToNumericalId(matchId);
+
+  return { 
+    ...candidate, 
+    matchId, 
+    lpNumericalId,
+    teamAId, 
+    teamAName: finalTeamAName, 
+    teamBId, 
+    teamBName: finalTeamBName 
+  };
+}
+
+export function stringToNumericalId(str: string): bigint {
+  const hash = createHash("md5").update(str).digest("hex").slice(0, 12);
+  return BigInt("0x" + hash);
 }
 
 function createStableMatchId(input: { sourceTitle: string; matchDate?: Date | null; teamAId: string; teamBId: string; extraHint: string }): string {

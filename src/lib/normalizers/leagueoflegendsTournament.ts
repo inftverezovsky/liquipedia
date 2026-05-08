@@ -452,12 +452,20 @@ function normalizeMatchCandidate(
 
   if (!teamAName && !teamBName) return null;
 
-  const teamAId = teamAName && !isPlaceholderTeam(teamAName) ? generateInternalTeamId(teamAName) : "tbd";
-  const teamBId = teamBName && !isPlaceholderTeam(teamBName) ? generateInternalTeamId(teamBName) : "tbd";
-  
-  const finalTeamAName = !teamAName || isPlaceholderTeam(teamAName) ? "TBD" : teamAName;
-  const finalTeamBName = !teamBName || isPlaceholderTeam(teamBName) ? "TBD" : teamBName;
+  // Numbered TBD logic
+  const matchIdx = parseInt(indexHint || "0", 10);
+  const tbdAName = `TBD${(matchIdx * 2) + 1}`;
+  const tbdBName = `TBD${(matchIdx * 2) + 2}`;
 
+  const isA_TBD = !teamAName || isPlaceholderTeam(teamAName);
+  const isB_TBD = !teamBName || isPlaceholderTeam(teamBName);
+
+  const finalTeamAName = isA_TBD ? tbdAName : teamAName;
+  const finalTeamBName = isB_TBD ? tbdBName : teamBName;
+
+  const teamAId = isA_TBD ? `tbd_${tbdAName.toLowerCase()}` : generateInternalTeamId(teamAName!);
+  const teamBId = isB_TBD ? `tbd_${tbdBName.toLowerCase()}` : generateInternalTeamId(teamBName!);
+  
   const matchId = candidate.matchId ?? createStableMatchId({
     sourceTitle,
     matchDate: candidate.matchDate,
@@ -469,15 +477,23 @@ function normalizeMatchCandidate(
     extraHint: indexHint
   });
 
+  const lpNumericalId = stringToNumericalId(matchId);
+
   return {
     ...candidate,
     matchId,
+    lpNumericalId,
     teamAId,
     teamAName: finalTeamAName,
     teamBId,
     teamBName: finalTeamBName,
     court: candidate.court || null
   };
+}
+
+export function stringToNumericalId(str: string): bigint {
+  const hash = createHash("md5").update(str).digest("hex").slice(0, 12);
+  return BigInt("0x" + hash);
 }
 
 /* ───── Deduplication ───── */

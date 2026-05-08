@@ -30,14 +30,17 @@ export default async function TournamentPage({ params }: { params: { id: string 
 
   // Get team mappings
   const teamNames = new Set<string>();
+  const isNumberedTbd = (name: string) => /^TBD\d+$/i.test(name);
+  
   for (const m of tournament.matches) {
-    if (m.teamAName && !isPlaceholderTeam(m.teamAName)) teamNames.add(m.teamAName);
-    if (m.teamBName && !isPlaceholderTeam(m.teamBName)) teamNames.add(m.teamBName);
+    if (m.teamAName && (!isPlaceholderTeam(m.teamAName) || isNumberedTbd(m.teamAName))) teamNames.add(m.teamAName);
+    if (m.teamBName && (!isPlaceholderTeam(m.teamBName) || isNumberedTbd(m.teamBName))) teamNames.add(m.teamBName);
   }
   for (const p of tournament.participants) {
-    if (p.name && !isPlaceholderTeam(p.name)) teamNames.add(p.name);
+    if (p.name && (!isPlaceholderTeam(p.name) || isNumberedTbd(p.name))) teamNames.add(p.name);
   }
-  teamNames.add("TBD");
+  // No need to add generic "TBD" here anymore if we have numbered ones
+  // teamNames.add("TBD");
 
   const mappings = await prisma.teamMapping.findMany({
     where: { disciplineSlug: "dota2", liquipediaName: { in: [...teamNames] } }

@@ -125,7 +125,8 @@ export function parseWikiDate(value?: string | null) {
   const parsed = Date.parse(cleaned);
   if (!Number.isNaN(parsed)) {
     const date = new Date(parsed);
-    // If it's just a date, adjust it? No, if it's from Date.parse it might be already shifted.
+    // Even for standard parsed dates, we force the +3h shift to treat them as MSK in our UI
+    date.setUTCHours(date.getUTCHours() + 3);
     return date;
   }
 

@@ -149,6 +149,11 @@ export async function importTournamentRecursive(params: {
       return rest;
     });
 
+    // 1.5 ALWAYS clear all matches first for a fresh start to avoid phantom duplicates
+    await prisma.tournamentMatch.deleteMany({
+      where: { tournamentId: mainResult.tournament.id }
+    });
+
     await prisma.tournamentMatch.createMany({
       data: deduplicatedMatches,
       skipDuplicates: true

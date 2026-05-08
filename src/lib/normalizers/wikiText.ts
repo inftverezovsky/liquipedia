@@ -93,24 +93,40 @@ export function parseWikiDate(value?: string | null) {
   const cleaned = cleanWikiValue(value);
   if (!cleaned) return null;
 
+  // 1. Try ISO-like: 2026-05-10 12:00
   const isoWithTime = cleaned.match(/(20\d{2}|19\d{2})[-/]([01]?\d)[-/]([0-3]?\d)[ T]([0-2]?\d):([0-5]\d)(?::([0-5]\d))?/);
   if (isoWithTime) {
     const [, year, month, day, hour, min, sec] = isoWithTime;
-    // ТАК КАК МЫ РАБОТАЕМ С МСК (UTC+3), мы создаем дату и вычитаем 3 часа, чтобы в UTC она была верной
     const date = new Date(`${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}T${hour.padStart(2, "0")}:${min.padStart(2, "0")}:${(sec || "00").padStart(2, "0")}Z`);
-    date.setUTCHours(date.getUTCHours() + 3); // Forced MSK shift
+    date.setUTCHours(date.getUTCHours() + 3); 
     return date;
   }
 
+  // 2. Try English format: May 10, 2026 - 12:00
+  const englishWithTime = cleaned.match(/([a-zA-Z]+)\s+([0-3]?\d),?\s+(20\d{2}|19\d{2})\s*-\s*([0-2]?\d):([0-5]\d)/);
+  if (englishWithTime) {
+    const [, monthStr, day, year, hour, min] = englishWithTime;
+    const date = new Date(`${monthStr} ${day}, ${year} ${hour}:${min}:00 UTC`);
+    if (!isNaN(date.getTime())) {
+      date.setUTCHours(date.getUTCHours() + 3);
+      return date;
+    }
+  }
+
+  // 3. Try plain ISO: 2026-05-10
   const iso = cleaned.match(/(20\d{2}|19\d{2})[-/]([01]?\d)[-/]([0-3]?\d)/);
   if (iso) {
     const [, year, month, day] = iso;
-    return new Date(`${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}T00:00:00.000Z`);
+    const date = new Date(`${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}T00:00:00.000Z`);
+    date.setUTCHours(date.getUTCHours() + 3);
+    return date;
   }
 
   const parsed = Date.parse(cleaned);
   if (!Number.isNaN(parsed)) {
-    return new Date(parsed);
+    const date = new Date(parsed);
+    // If it's just a date, adjust it? No, if it's from Date.parse it might be already shifted.
+    return date;
   }
 
   return null;

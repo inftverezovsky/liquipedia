@@ -83,8 +83,15 @@ export default async function TournamentPage({ params }: { params: { id: string 
               ) : null}
             </div>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <LoadTournamentButton pageId={tournament.sourcePageId} title={tournament.sourceTitle} pageUrl={tournament.sourceUrl} disciplineSlug="leagueoflegends" />
+          <div className="flex shrink-0 gap-3">
+            <LoadTournamentButton 
+              pageId={tournament.sourcePageId} 
+              title={tournament.sourceTitle} 
+              pageUrl={tournament.sourceUrl} 
+              disciplineSlug="leagueoflegends" 
+              initialTournamentId={tournament.id}
+              force={true}
+            />
           </div>
         </div>
       </section>

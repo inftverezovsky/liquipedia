@@ -11,6 +11,7 @@ type Body = {
   pageId?: unknown;
   title?: unknown;
   pageUrl?: unknown;
+  force?: boolean;
 };
 
 export async function POST(request: Request) {
@@ -48,7 +49,8 @@ export async function POST(request: Request) {
       title,
       pageUrl,
       normalizer: normalizeLeagueOfLegendsTournament,
-      importRecordId: tournamentImport.id
+      importRecordId: tournamentImport.id,
+      force: body.force
     });
 
     await prisma.tournamentImport.update({

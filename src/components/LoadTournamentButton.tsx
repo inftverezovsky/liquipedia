@@ -8,20 +8,22 @@ export default function LoadTournamentButton({
   title,
   pageUrl,
   disciplineSlug,
-  initialTournamentId
+  initialTournamentId,
+  force = false
 }: {
   pageId?: number | null;
   title: string;
   pageUrl?: string | null;
   disciplineSlug: string;
   initialTournamentId?: string;
+  force?: boolean;
 }) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function loadTournament() {
-    if (initialTournamentId) {
+    if (initialTournamentId && !force) {
       router.push(`/${disciplineSlug}/tournament/${initialTournamentId}`);
       return;
     }
@@ -33,7 +35,7 @@ export default function LoadTournamentButton({
       const response = await fetch(`/api/${disciplineSlug}/import-tournament`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pageId, title, pageUrl })
+        body: JSON.stringify({ pageId, title, pageUrl, force: true })
       });
 
       const data = (await response.json()) as { tournament?: { id: string }; error?: string };
@@ -59,7 +61,7 @@ export default function LoadTournamentButton({
         disabled={loading}
         className="rounded-xl bg-slate-500/5 backdrop-blur-sm px-5 py-2.5 text-sm font-medium text-slate-600 border border-slate-200/50 hover:bg-slate-500/10 disabled:cursor-not-allowed disabled:opacity-50 transition-all"
       >
-        {loading ? "Загружаю..." : initialTournamentId ? "Открыть" : "Загрузить данные"}
+        {loading ? (force ? "Обновляю..." : "Загружаю...") : force ? "Обновить данные" : initialTournamentId ? "Открыть" : "Загрузить данные"}
       </button>
       {error ? <p className="max-w-56 text-xs text-red-600">{error}</p> : null}
     </div>

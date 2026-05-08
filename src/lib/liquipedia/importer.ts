@@ -18,8 +18,9 @@ export async function importTournamentRecursive(params: {
     parsedHtml?: string;
   }) => NormalizedTournament;
   importRecordId: string;
+  force?: boolean;
 }) {
-  const { disciplineId, disciplineSlug, apiUrl, pageId, title, pageUrl, normalizer, importRecordId } = params;
+  const { disciplineId, disciplineSlug, apiUrl, pageId, title, pageUrl, normalizer, importRecordId, force } = params;
 
   // 1. Process Main Page
   const mainResult = await processSinglePage({
@@ -30,7 +31,8 @@ export async function importTournamentRecursive(params: {
     title,
     pageUrl,
     normalizer,
-    importRecordId
+    importRecordId,
+    force
   });
 
   // 2. Process Sub-pages (one level deep)
@@ -48,6 +50,7 @@ export async function importTournamentRecursive(params: {
           pageUrl: subUrl,
           normalizer,
           importRecordId,
+          force,
           tournamentId: mainResult.tournament.id // Link to main tournament
         });
       } catch (err) {
@@ -69,18 +72,19 @@ async function processSinglePage(params: {
   normalizer: any;
   importRecordId: string;
   tournamentId?: string;
+  force?: boolean;
 }) {
-  const { disciplineSlug, apiUrl, pageId, title, pageUrl, normalizer, importRecordId, tournamentId } = params;
+  const { disciplineSlug, apiUrl, pageId, title, pageUrl, normalizer, importRecordId, tournamentId, force } = params;
 
-  // 1. Check for cached snapshot (less than 366 days old)
-  const cacheThreshold = new Date(Date.now() - 366 * 24 * 60 * 60 * 1000);
-  const cachedSnapshot = await prisma.rawSnapshot.findFirst({
+  // 1. Check for cached snapshot (Default 1 hour cache, unless forced)
+  const cacheThreshold = new Date(Date.now() - 1 * 60 * 60 * 1000); // 1 hour
+  const cachedSnapshot = !force ? await prisma.rawSnapshot.findFirst({
     where: {
       pageTitle: title,
       fetchedAt: { gte: cacheThreshold }
     },
     orderBy: { fetchedAt: 'desc' }
-  });
+  }) : null;
 
   let wikitext: string;
   let pageTitle: string;

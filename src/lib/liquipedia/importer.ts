@@ -113,29 +113,23 @@ export async function importTournamentRecursive(params: {
     // DEDUPLICATE internally before inserting
     const uniqueMatchesMap = new Map<string, any>();
     for (const m of allMatches) {
-      const key = m.matchId; // Standard key
-      const dayKey = (m as any)._dayTeamsKey; // Aggressive day+teams key
+      const dayKey = (m as any)._dayTeamsKey;
       
-      // Look for match by exact ID or by the aggressive day+teams key
-      let existing = uniqueMatchesMap.get(key);
-      if (!existing && dayKey) {
-        existing = Array.from(uniqueMatchesMap.values()).find(em => (em as any)._dayTeamsKey === dayKey);
-      }
+      const existing = uniqueMatchesMap.get(dayKey);
 
       if (!existing) {
-        uniqueMatchesMap.set(key, m);
+        uniqueMatchesMap.set(dayKey, m);
       } else {
-        // MERGE LOGIC: Keep the earliest match if times differ (to avoid SGT/UTC+ offsets)
+        // MERGE LOGIC: Keep the earlier match if times differ
         let preferred = existing;
         const existingDate = existing.matchDate ? new Date(existing.matchDate) : null;
         const currentDate = m.matchDate ? new Date(m.matchDate) : null;
         
         if (existingDate && currentDate && currentDate < existingDate) {
-          preferred = m; // New match is earlier, probably the 'original' timezone match
+          preferred = m;
         }
         
-        // Merge data, keeping the preferred time and non-null IDs
-        uniqueMatchesMap.set(preferred.matchId, {
+        uniqueMatchesMap.set(dayKey, {
           ...existing,
           ...m,
           matchId: preferred.matchId,

@@ -37,7 +37,6 @@ function getMatchDateObj(match: Match): Date | null {
     // Treat as MSK: create UTC date then subtract 3h
     const parsed = new Date(cleaned + "Z");
     if (!isNaN(parsed.getTime())) {
-      parsed.setUTCHours(parsed.getUTCHours() - 3);
       d = parsed;
     }
   }
@@ -137,11 +136,11 @@ export default function MatchList({
     setSelectedIds(newIds);
   }
 
-  function formatMoscowDate(match: Match): string {
+  function formatNeutralDate(match: Match): string {
     const d = getMatchDateObj(match);
     if (!d) return "—";
     return new Intl.DateTimeFormat("ru-RU", {
-      timeZone: "Europe/Moscow",
+      timeZone: "UTC",
       day: "2-digit", month: "2-digit", year: "numeric",
       hour: "2-digit", minute: "2-digit", hour12: false
     }).format(d).replace(",", "");
@@ -238,7 +237,7 @@ export default function MatchList({
                       )}
                     </div>
                     <div className="flex items-center gap-4">
-                      <span className="text-xs font-bold text-slate-900 tabular-nums">{formatMoscowDate(match)}</span>
+                      <span className="text-xs font-bold text-slate-900 tabular-nums">{formatNeutralDate(match)}</span>
                       <div className={`h-5 w-5 rounded-md border transition-all flex items-center justify-center ${
                         isSelected ? "bg-indigo-600 border-indigo-600" : "bg-white border-slate-200"
                       }`}>

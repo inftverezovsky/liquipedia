@@ -169,7 +169,7 @@ export async function fetchDisciplinePortal(slug: string): Promise<DisciplinePor
       if (t.endDate.getTime() < now.getTime() - 1000 * 60 * 60 * 24) return false;
       if (t.status === 'upcoming') {
         const diffDays = (t.startDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
-        return diffDays <= 14;
+        return diffDays <= 7;
       }
       return true;
     });

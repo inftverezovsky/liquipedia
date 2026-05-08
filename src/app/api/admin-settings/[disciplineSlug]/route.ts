@@ -1,26 +1,19 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getAdminAuthConfigStatus } from '@/lib/adminUpload/adminHttpClient';
-import { getAdminSettings } from '@/lib/adminUpload/getAdminSettings';
+import { resolveAdminSettings } from '@/lib/adminUpload/resolveAdminSettings';
 
 export async function GET(
   request: Request,
   { params }: { params: { disciplineSlug: string } }
 ) {
   try {
-    const settings = getAdminSettings(params.disciplineSlug);
+    const settings = await resolveAdminSettings(params.disciplineSlug);
     const authStatus = getAdminAuthConfigStatus();
 
     const merged = {
       disciplineSlug: params.disciplineSlug,
-      apiUrl: settings?.apiUrl || null,
-      adminSportId: settings?.adminSportId || null,
-      adminMax: settings?.adminMax || '5000',
-      defaultShapkaId: settings?.defaultShapkaId || null,
-      timezone: settings?.timezone || 'Europe/Moscow',
-      dateFormat: settings?.dateFormat || 'DD.MM.YYYY HH:mm:ss',
-      requestMode: settings?.requestMode || 'legacy_raw',
-      sslVerify: settings?.sslVerify ?? true,
+      ...settings,
       authStatus,
     };
 

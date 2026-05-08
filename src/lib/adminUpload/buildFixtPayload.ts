@@ -1,6 +1,6 @@
 import { DateTime } from 'luxon';
 import { prisma } from '@/lib/db';
-import { getAdminSettings } from './getAdminSettings';
+import { resolveAdminSettings } from './resolveAdminSettings';
 
 export interface FixtMatch {
   date: string;
@@ -30,20 +30,16 @@ export async function buildFixtPayload(
   const warnings: string[] = [];
   const skippedMatches: any[] = [];
 
-  // 1. Fetch settings from file config
-  const settings = getAdminSettings(disciplineSlug);
+  // 1. Fetch settings from Prisma (discipline-specific or global)
+  const settings = await resolveAdminSettings(disciplineSlug);
 
   const mapping = await prisma.tournamentAdminMapping.findUnique({
     where: { tournamentId },
   });
 
-  if (!settings) {
-    throw new Error(`Admin settings for discipline ${disciplineSlug} not found.`);
-  }
-
   const shapkaId = mapping?.adminShapkaId || settings.defaultShapkaId;
   const sportId = settings.adminSportId;
-  const max = settings.adminMax || '5000';
+  const max = settings.adminMax;
 
   if (!shapkaId) warnings.push('Shapka ID is not set.');
   if (!sportId) warnings.push('Sport ID is not set.');

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { buildFixtPayload } from '@/lib/adminUpload/buildFixtPayload';
 import { phpSerialize } from '@/lib/adminUpload/phpSerialize';
+import { resolveAdminSettings } from '@/lib/adminUpload/resolveAdminSettings';
 import { sendFixtPayload } from '@/lib/adminUpload/sendFixtPayload';
 
 export async function POST(
@@ -11,13 +12,11 @@ export async function POST(
   try {
     const { disciplineSlug, selectedMatchIds } = await request.json();
     
-    // 1. Get settings
-    const settings = await prisma.disciplineAdminSettings.findUnique({
-      where: { disciplineSlug },
-    });
+    // 1. Get settings (prefer discipline-specific, fallback to global)
+    const settings = await resolveAdminSettings(disciplineSlug);
 
-    if (!settings || !settings.apiUrl) {
-      return NextResponse.json({ ok: false, error: "Admin API URL is not configured." }, { status: 400 });
+    if (!settings.apiUrl) {
+      return NextResponse.json({ ok: false, error: "Admin API URL is not configured. Please set it in Settings (Global or Discipline-specific)." }, { status: 400 });
     }
 
     // 2. Build payload

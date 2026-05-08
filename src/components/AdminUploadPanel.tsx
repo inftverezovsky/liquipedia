@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 
 interface AdminMapping {
   adminShapkaId: string;
@@ -61,6 +61,28 @@ export default function AdminUploadPanel({
   const [lastSavedId, setLastSavedId] = useState<string | null>(null);
   const [result, setResult] = useState<{ type: 'success' | 'error' | 'info'; text: string; raw?: string } | null>(null);
 
+  const handlePreview = useCallback(async () => {
+    setActionLoading(true);
+    setResult(null);
+    try {
+      const res = await fetch(`/api/${disciplineSlug}/tournament/${tournamentId}/admin-fixt-preview`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ disciplineSlug, selectedMatchIds }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setPreview(data);
+      } else {
+        setResult({ type: 'error', text: data.error || 'Ошибка превью' });
+      }
+    } catch (e) {
+      setResult({ type: 'error', text: 'Ошибка превью' });
+    } finally {
+      setActionLoading(false);
+    }
+  }, [disciplineSlug, tournamentId, selectedMatchIds]);
+
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -89,9 +111,9 @@ export default function AdminUploadPanel({
     const handleTrigger = () => handlePreview();
     window.addEventListener('trigger-admin-preview', handleTrigger);
     return () => window.removeEventListener('trigger-admin-preview', handleTrigger);
-  }, [tournamentId, disciplineSlug]);
+  }, [tournamentId, disciplineSlug, handlePreview]);
 
-  const handleSaveMapping = async () => {
+  const handleSaveMapping = useCallback(async () => {
     setActionLoading(true);
     setResult(null);
     try {
@@ -113,29 +135,7 @@ export default function AdminUploadPanel({
     } finally {
       setActionLoading(false);
     }
-  };
-
-  const handlePreview = async () => {
-    setActionLoading(true);
-    setResult(null);
-    try {
-      const res = await fetch(`/api/${disciplineSlug}/tournament/${tournamentId}/admin-fixt-preview`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ disciplineSlug, selectedMatchIds }),
-      });
-      const data = await res.json();
-      if (data.ok) {
-        setPreview(data);
-      } else {
-        setResult({ type: 'error', text: data.error || 'Ошибка превью' });
-      }
-    } catch (e) {
-      setResult({ type: 'error', text: 'Ошибка превью' });
-    } finally {
-      setActionLoading(false);
-    }
-  };
+  }, [disciplineSlug, tournamentId, mapping, tournamentName]);
 
   const handleSend = async () => {
     if (!confirm('Залить данные в API?')) return;

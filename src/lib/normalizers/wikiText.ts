@@ -98,6 +98,7 @@ export function parseWikiDate(value?: string | null) {
     const [, year, month, day, hour, min, sec] = isoWithTime;
     // ТАК КАК МЫ РАБОТАЕМ С МСК (UTC+3), мы создаем дату и вычитаем 3 часа, чтобы в UTC она была верной
     const date = new Date(`${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}T${hour.padStart(2, "0")}:${min.padStart(2, "0")}:${(sec || "00").padStart(2, "0")}Z`);
+    date.setUTCHours(date.getUTCHours() + 3); // Forced MSK shift
     return date;
   }
 

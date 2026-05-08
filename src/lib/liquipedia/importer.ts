@@ -79,16 +79,26 @@ export async function importTournamentRecursive(params: {
   if (allMatches.length > 0) {
     console.log(`[Importer] Performing final bulk insert of ${allMatches.length} matches...`);
     
-    // RE-ASSIGN matchIds consistently using the main page title so subpage matches match exactly
-    const mainTournamentKey = title.split('/')[0].trim();
+    // RE-ASSIGN matchIds consistently using the FULL tournament title
+    const mainTournamentKey = title.trim();
     for (const m of allMatches) {
       let dateStr = "";
+      // Try matchDate first
       if (m.matchDate) {
         const d = new Date(m.matchDate);
         if (!isNaN(d.getTime())) {
           dateStr = d.toISOString().split('T')[0];
         }
       }
+      // Fallback to parsing matchDateTime string if matchDate is missing
+      if (!dateStr && m.matchDateTime) {
+        const cleaned = m.matchDateTime.replace(/\s*-\s*/, " ").replace(/\s+[A-Z]{2,5}$/, "");
+        const parsed = new Date(cleaned + "Z");
+        if (!isNaN(parsed.getTime())) {
+          dateStr = parsed.toISOString().split('T')[0];
+        }
+      }
+
       const teams = [m.teamAId || "unknownA", m.teamBId || "unknownB"].sort();
       const data = [mainTournamentKey, dateStr, teams[0], teams[1]].join("|");
       const crypto = await import("crypto");
@@ -96,21 +106,49 @@ export async function importTournamentRecursive(params: {
       m.matchId = `match_${hash}`;
       m.lpNumericalId = BigInt("0x" + hash.substring(0, 15)) % 9007199254740991n;
       m.tournamentId = mainResult.tournament.id;
+      // Also store a secondary key for even more aggressive day-level deduplication
+      (m as any)._dayTeamsKey = `${dateStr}|${teams[0]}|${teams[1]}`;
     }
 
-    // DEDUPLICATE internally before inserting to prevent unique constraint failures
-    const uniqueMatchesMap = new Map();
+    // DEDUPLICATE internally before inserting
+    const uniqueMatchesMap = new Map<string, any>();
     for (const m of allMatches) {
-      // If we already have this match, prefer the one with a date or more info
-      if (!uniqueMatchesMap.has(m.matchId)) {
-        uniqueMatchesMap.set(m.matchId, m);
+      const key = m.matchId; // Standard key
+      const dayKey = (m as any)._dayTeamsKey; // Aggressive day+teams key
+      
+      // Look for match by exact ID or by the aggressive day+teams key
+      let existing = uniqueMatchesMap.get(key);
+      if (!existing && dayKey) {
+        existing = Array.from(uniqueMatchesMap.values()).find(em => (em as any)._dayTeamsKey === dayKey);
+      }
+
+      if (!existing) {
+        uniqueMatchesMap.set(key, m);
       } else {
-        const existing = uniqueMatchesMap.get(m.matchId);
-        // Merge: keep the first but override with richer data if available
-        uniqueMatchesMap.set(m.matchId, { ...existing, ...m, matchDate: existing.matchDate || m.matchDate });
+        // MERGE LOGIC: Keep the earliest match if times differ (to avoid SGT/UTC+ offsets)
+        let preferred = existing;
+        const existingDate = existing.matchDate ? new Date(existing.matchDate) : null;
+        const currentDate = m.matchDate ? new Date(m.matchDate) : null;
+        
+        if (existingDate && currentDate && currentDate < existingDate) {
+          preferred = m; // New match is earlier, probably the 'original' timezone match
+        }
+        
+        // Merge data, keeping the preferred time and non-null IDs
+        uniqueMatchesMap.set(preferred.matchId, {
+          ...existing,
+          ...m,
+          matchId: preferred.matchId,
+          matchDate: preferred.matchDate || existing.matchDate,
+          matchDateTime: preferred.matchDateTime || existing.matchDateTime,
+          platformId: existing.platformId || m.platformId
+        });
       }
     }
-    const deduplicatedMatches = Array.from(uniqueMatchesMap.values());
+    const deduplicatedMatches = Array.from(uniqueMatchesMap.values()).map(m => {
+      const { _dayTeamsKey, ...rest } = m;
+      return rest;
+    });
 
     await prisma.tournamentMatch.createMany({
       data: deduplicatedMatches,

@@ -165,6 +165,10 @@ export function normalizeDota2Tournament(input: {
       return normalized;
     })
     .filter((m): m is NormalizedMatch => m !== null);
+  
+  // Apply TBD pair cycling logic (TBD1-16)
+  applyTbdPairCycling(normalizedMatches, input.title);
+
   const matches = dedupeMatches(normalizedMatches);
 
   /* ── Diagnostics ── */
@@ -468,11 +472,11 @@ function normalizeMatchCandidate(
   const isA_TBD = !teamAName || isPlaceholderTeam(teamAName);
   const isB_TBD = !teamBName || isPlaceholderTeam(teamBName);
 
-  const finalTeamAName = isA_TBD ? tbdAName : teamAName;
-  const finalTeamBName = isB_TBD ? tbdBName : teamBName;
+  const finalTeamAName = isA_TBD ? "TBD" : teamAName;
+  const finalTeamBName = isB_TBD ? "TBD" : teamBName;
 
-  const teamAId = isA_TBD ? `tbd_${tbdAName.toLowerCase()}` : generateInternalTeamId(teamAName!);
-  const teamBId = isB_TBD ? `tbd_${tbdBName.toLowerCase()}` : generateInternalTeamId(teamBName!);
+  const teamAId = isA_TBD ? `tbd` : generateInternalTeamId(teamAName!);
+  const teamBId = isB_TBD ? `tbd` : generateInternalTeamId(teamBName!);
   
   const matchId = candidate.matchId ?? createStableMatchId({
     sourceTitle,
@@ -497,6 +501,74 @@ function normalizeMatchCandidate(
     teamBName: finalTeamBName,
     court: candidate.court || null
   };
+}
+
+function applyTbdPairCycling(matches: NormalizedMatch[], sourceTitle: string) {
+  // 1. Identify "Pure TBD" matches (both sides are placeholders)
+  const tbdMatches = matches.filter(m => 
+    (!m.teamAName || isPlaceholderTeam(m.teamAName)) && 
+    (!m.teamBName || isPlaceholderTeam(m.teamBName))
+  );
+
+  if (tbdMatches.length === 0) return;
+
+  // 2. Sort by date/time to ensure chronological assignment
+  tbdMatches.sort((a, b) => {
+    const tsA = a.matchDate?.getTime() || 0;
+    const tsB = b.matchDate?.getTime() || 0;
+    if (tsA !== tsB) return tsA - tsB;
+    return (a.stage || "").localeCompare(b.stage || "") || (a.round || "").localeCompare(b.round || "");
+  });
+
+  // 3. Pair cycling logic
+  const pairLastUsed = new Array(9).fill(0); 
+  const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
+
+  tbdMatches.forEach((m, idx) => {
+    const matchTs = m.matchDate?.getTime() || 0;
+    
+    let selectedPair = -1;
+    for (let p = 1; p <= 8; p++) {
+      if (matchTs - pairLastUsed[p] >= TWO_HOURS_MS || pairLastUsed[p] === 0) {
+        selectedPair = p;
+        break;
+      }
+    }
+
+    if (selectedPair === -1) {
+      selectedPair = 1;
+      let oldestTs = pairLastUsed[1];
+      for (let p = 2; p <= 8; p++) {
+        if (pairLastUsed[p] < oldestTs) {
+          oldestTs = pairLastUsed[p];
+          selectedPair = p;
+        }
+      }
+    }
+
+    const tbdA = `TBD${(selectedPair * 2) - 1}`;
+    const tbdB = `TBD${selectedPair * 2}`;
+    
+    m.teamAName = tbdA;
+    m.teamBName = tbdB;
+    m.teamAId = `tbd_${tbdA.toLowerCase()}`;
+    m.teamBId = `tbd_${tbdB.toLowerCase()}`;
+    
+    pairLastUsed[selectedPair] = matchTs || (Date.now() + idx); // Fallback for sorting if no date
+
+    // Recalculate IDs
+    m.matchId = createStableMatchId({
+      sourceTitle,
+      matchDate: m.matchDate,
+      matchDateTime: m.matchDateTime,
+      teamAId: m.teamAId,
+      teamBId: m.teamBId,
+      stage: m.stage,
+      round: m.round,
+      extraHint: String(idx)
+    });
+    m.lpNumericalId = stringToNumericalId(m.matchId);
+  });
 }
 
 /* ───── Deduplication ───── */

@@ -157,9 +157,12 @@ export default function AdminUploadPanel({
         // Dispatch custom event to refresh MatchList history
         window.dispatchEvent(new CustomEvent('admin-upload-success'));
       } else {
+        const warningText = data.warnings && data.warnings.length > 0 
+          ? `\n\nВнимание:\n${data.warnings.join('\n')}` 
+          : '';
         setResult({ 
           type: 'error', 
-          text: data.error || 'Ошибка при заливке',
+          text: (data.error || 'Ошибка при заливке') + warningText,
           raw: data.rawResponse 
         });
       }
@@ -254,7 +257,7 @@ export default function AdminUploadPanel({
                }`}>
                  <span className="text-lg font-black">{result.type === 'success' ? '✓' : '!'}</span>
                </div>
-               <p className="text-sm font-bold tracking-tight">{result.text}</p>
+               <p className="text-sm font-bold tracking-tight whitespace-pre-line">{result.text}</p>
             </div>
             
             {result.raw && (

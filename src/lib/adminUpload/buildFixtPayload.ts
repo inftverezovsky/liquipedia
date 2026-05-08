@@ -88,6 +88,12 @@ export async function buildFixtPayload(
     const isMappedB = platformIdB && (mappingB.status === 'auto_mapped' || mappingB.status === 'manual_mapped');
 
     if (!isMappedA || !isMappedB) {
+      const missing = [];
+      if (!isMappedA) missing.push(teamAName);
+      if (!isMappedB) missing.push(teamBName);
+      
+      warnings.push(`Команды без ID: ${missing.join(', ')}`);
+      
       skippedMatches.push({
         matchId: match.matchId,
         reason: 'Missing or unmapped team platform IDs',

@@ -642,7 +642,9 @@ function createStableMatchId(input: {
   let dateStr = "";
   if (input.matchDate) {
     const d = new Date(input.matchDate);
-    dateStr = d.toISOString().split('T')[0];
+    if (!isNaN(d.getTime())) {
+      dateStr = d.toISOString().split('T')[0];
+    }
   }
 
   // Sort team IDs to handle A/B swaps

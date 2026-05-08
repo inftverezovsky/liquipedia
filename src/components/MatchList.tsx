@@ -37,7 +37,7 @@ function getMatchDateObj(match: Match): Date | null {
     // Treat as MSK: create UTC date then subtract 3h
     const parsed = new Date(cleaned + "Z");
     if (!isNaN(parsed.getTime())) {
-      parsed.setHours(parsed.getHours() - 3);
+      parsed.setUTCHours(parsed.getUTCHours() - 3);
       d = parsed;
     }
   }

@@ -280,12 +280,10 @@ async function processSinglePage(params: {
       const matchPlatformMap = new Map(existingMatches.filter((em: any) => em.platformId).map((em: any) => [em.matchId, em.platformId]));
       const lpIdMap = new Map(existingMatches.filter((em: any) => em.lpNumericalId).map((em: any) => [em.matchId, em.lpNumericalId]));
 
-      // 1.5 Optional: Clear all matches first for a fresh start
-      if (params.clearMatches) {
-        await prisma.tournamentMatch.deleteMany({
-          where: { tournamentId: tournament.id }
-        });
-      }
+      // 1.5 ALWAYS clear all matches first for a fresh start to avoid phantom duplicates
+      await prisma.tournamentMatch.deleteMany({
+        where: { tournamentId: tournament.id }
+      });
 
       // 2. Prepare data (FILTERING: Only upcoming, no results, Today + 7 days)
       const today = new Date();

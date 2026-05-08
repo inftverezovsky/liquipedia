@@ -54,12 +54,14 @@ export async function importTournamentRecursive(params: {
     const wikitextMap = new Map(preFetchedWikitexts.map(p => [p.title.toLowerCase(), p]));
 
     // 2.2 Process all sub-pages in parallel
+    const allMatchIds: string[] = [...(mainResult.processedMatchIds || [])];
+
     const subPromises = mainResult.normalized.subPages.map(async (subUrl) => {
       try {
         const subTitle = decodeURIComponent(subUrl.split("/").pop() ?? "").replace(/_/g, " ");
         const preFetched = wikitextMap.get(subTitle.toLowerCase());
 
-        return processSinglePage({
+        const res = await processSinglePage({
           disciplineId,
           disciplineSlug,
           apiUrl,
@@ -71,12 +73,40 @@ export async function importTournamentRecursive(params: {
           tournamentId: mainResult.tournament.id,
           preFetchedWikitext: preFetched
         });
+        if (res.processedMatchIds) {
+          allMatchIds.push(...res.processedMatchIds);
+        }
+        return res;
       } catch (err) {
         console.error(`[Importer] Failed to process sub-page ${subUrl}:`, err);
       }
     });
 
     await Promise.all(subPromises);
+
+    // 3. Cleanup Orphaned Matches
+    // Delete matches belonging to this tournament that were NOT seen in this import session.
+    // This removes "ghost" matches from previous logic changes or site updates.
+    if (allMatchIds.length > 0) {
+      const deleteResult = await prisma.tournamentMatch.deleteMany({
+        where: {
+          tournamentId: mainResult.tournament.id,
+          matchId: { notIn: allMatchIds }
+        }
+      });
+      console.log(`[Importer] Cleaned up ${deleteResult.count} orphaned matches for tournament ${mainResult.tournament.id}`);
+    }
+  } else {
+    // No subpages, just cleanup based on main page matches
+    if (mainResult.processedMatchIds && mainResult.processedMatchIds.length > 0) {
+      const deleteResult = await prisma.tournamentMatch.deleteMany({
+        where: {
+          tournamentId: mainResult.tournament.id,
+          matchId: { notIn: mainResult.processedMatchIds }
+        }
+      });
+      console.log(`[Importer] Cleaned up ${deleteResult.count} orphaned matches for tournament ${mainResult.tournament.id}`);
+    }
   }
 
   console.log(`[Importer] Completed import for ${title} in ${Date.now() - startTime}ms`);
@@ -345,8 +375,10 @@ async function processSinglePage(params: {
            }).catch(() => {});
         }
       }));
+      }));
     }
   }
 
-  return { tournament, normalized };
+  const processedMatchIds = normalized.matches.map(m => m.matchId).filter((id): id is string => !!id);
+  return { tournament, normalized, processedMatchIds };
 }

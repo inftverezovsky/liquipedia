@@ -50,7 +50,7 @@
     "seed": "tsx prisma/seed.ts"
   },
   "engines": {
-    "node": "22.x"
+    "node": "24.x"
   },
   "optionalDependencies": {
     "@next/swc-linux-x64-gnu": "14.2.33",

@@ -306,8 +306,8 @@ function extractMatchesFromParsedHtml(html: string, pageUrl: string): Normalized
       round,
       matchDate,
       matchDateTime: dateText,
-      teamAName: teamAName && teamAName !== "TBD" ? teamAName : null,
-      teamBName: teamBName && teamBName !== "TBD" ? teamBName : null,
+      teamAName,
+      teamBName,
       scoreA: scoreAText ? parseInt(scoreAText, 10) : null,
       scoreB: scoreBText ? parseInt(scoreBText, 10) : null,
       format: null,
@@ -373,8 +373,8 @@ function extractMatchesFromParsedHtml(html: string, pageUrl: string): Normalized
       round,
       matchDate,
       matchDateTime: dateText,
-      teamAName: teamAName && teamAName !== "TBD" ? teamAName : null,
-      teamBName: teamBName && teamBName !== "TBD" ? teamBName : null,
+      teamAName,
+      teamBName,
       scoreA: !isNaN(scoreA as number) ? scoreA : null,
       scoreB: !isNaN(scoreB as number) ? scoreB : null,
       format: formatText,
@@ -451,7 +451,7 @@ function normalizeMatchCandidate(
   const teamAName = candidate.teamAName?.trim() || null;
   const teamBName = candidate.teamBName?.trim() || null;
 
-  if (!teamAName && !teamBName) return null;
+  if (!teamAName && !teamBName && !indexHint) return null;
 
   // Numbered TBD logic
   const matchIdx = parseInt(indexHint || "0", 10);

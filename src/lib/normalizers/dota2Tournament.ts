@@ -312,8 +312,8 @@ function extractMatchesFromParsedHtml(html: string, pageUrl: string): Normalized
       round,
       matchDate,
       matchDateTime: dateText,
-      teamAName: teamAName && teamAName !== "TBD" ? teamAName : null,
-      teamBName: teamBName && teamBName !== "TBD" ? teamBName : null,
+      teamAName,
+      teamBName,
       scoreA: scoreAText ? parseInt(scoreAText, 10) : null,
       scoreB: scoreBText ? parseInt(scoreBText, 10) : null,
       format: null,
@@ -379,8 +379,8 @@ function extractMatchesFromParsedHtml(html: string, pageUrl: string): Normalized
       round,
       matchDate,
       matchDateTime: dateText,
-      teamAName: teamAName && teamAName !== "TBD" ? teamAName : null,
-      teamBName: teamBName && teamBName !== "TBD" ? teamBName : null,
+      teamAName,
+      teamBName,
       scoreA: !isNaN(scoreA as number) ? scoreA : null,
       scoreB: !isNaN(scoreB as number) ? scoreB : null,
       format: formatText,
@@ -455,8 +455,10 @@ function normalizeMatchCandidate(
   const teamAName = candidate.teamAName?.trim() || null;
   const teamBName = candidate.teamBName?.trim() || null;
 
-  // Must have at least one real team
-  if (!teamAName && !teamBName) return null;
+  // We now allow matches with two placeholder teams (e.g. TBD vs TBD)
+  // because they will be assigned stable numbered placeholders (TBD1, TBD2...)
+  // if both are missing, we still continue if there is at least an indexHint
+  if (!teamAName && !teamBName && !indexHint) return null;
 
   // Numbered TBD logic
   const matchIdx = parseInt(indexHint || "0", 10);

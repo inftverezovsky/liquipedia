@@ -96,7 +96,10 @@ export function parseWikiDate(value?: string | null) {
   const isoWithTime = cleaned.match(/(20\d{2}|19\d{2})[-/]([01]?\d)[-/]([0-3]?\d)[ T]([0-2]?\d):([0-5]\d)(?::([0-5]\d))?/);
   if (isoWithTime) {
     const [, year, month, day, hour, min, sec] = isoWithTime;
-    return new Date(`${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}T${hour.padStart(2, "0")}:${min.padStart(2, "0")}:${(sec || "00").padStart(2, "0")}.000Z`);
+    // ТАК КАК МЫ РАБОТАЕМ С МСК (UTC+3), мы создаем дату и вычитаем 3 часа, чтобы в UTC она была верной
+    const date = new Date(`${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}T${hour.padStart(2, "0")}:${min.padStart(2, "0")}:${(sec || "00").padStart(2, "0")}Z`);
+    date.setHours(date.getHours() - 3); // Коррекция MSK -> UTC
+    return date;
   }
 
   const iso = cleaned.match(/(20\d{2}|19\d{2})[-/]([01]?\d)[-/]([0-3]?\d)/);

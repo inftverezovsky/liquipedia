@@ -638,15 +638,24 @@ function createStableMatchId(input: {
   // Try to use a more stable tournament key by removing sub-page suffixes
   const tournamentKey = input.sourceTitle.split('/')[0].trim();
   
+  // Normalized date (Day only) for deduplication
+  let dateStr = "";
+  if (input.matchDate) {
+    const d = new Date(input.matchDate);
+    dateStr = d.toISOString().split('T')[0];
+  }
+
+  // Sort team IDs to handle A/B swaps
+  const teams = [input.teamAId || "unknownA", input.teamBId || "unknownB"].sort();
+
   const data = [
     tournamentKey,
-    input.matchDate?.getTime() ?? "", 
-    input.teamAId ?? "unknownA",
-    input.teamBId ?? "unknownB",
-    input.stage ?? "",
-    input.round ?? "",
-    input.extraHint ?? ""
+    dateStr,
+    teams[0],
+    teams[1],
+    // We ignore stage/round/extraHint in the ID to merge matches across subpages
   ].join("|");
+  
   const hash = createHash("md5").update(data).digest("hex").slice(0, 12);
   return `match_${hash}`;
 }

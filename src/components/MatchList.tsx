@@ -34,8 +34,12 @@ function getMatchDateObj(match: Match): Date | null {
   }
   if (!d && match.matchDateTime) {
     const cleaned = match.matchDateTime.replace(/\s*-\s*/, " ").replace(/\s+[A-Z]{2,5}$/, "");
-    const parsed = new Date(cleaned + " UTC");
-    if (!isNaN(parsed.getTime())) d = parsed;
+    // Treat as MSK: create UTC date then subtract 3h
+    const parsed = new Date(cleaned + "Z");
+    if (!isNaN(parsed.getTime())) {
+      parsed.setHours(parsed.getHours() - 3);
+      d = parsed;
+    }
   }
   return d;
 }

@@ -78,8 +78,42 @@ export async function importTournamentRecursive(params: {
   // 3. FINAL BULK INSERT (One big push for everything!)
   if (allMatches.length > 0) {
     console.log(`[Importer] Performing final bulk insert of ${allMatches.length} matches...`);
+    
+    // RE-ASSIGN matchIds consistently using the main page title so subpage matches match exactly
+    const mainTournamentKey = title.split('/')[0].trim();
+    for (const m of allMatches) {
+      let dateStr = "";
+      if (m.matchDate) {
+        const d = new Date(m.matchDate);
+        if (!isNaN(d.getTime())) {
+          dateStr = d.toISOString().split('T')[0];
+        }
+      }
+      const teams = [m.teamAId || "unknownA", m.teamBId || "unknownB"].sort();
+      const data = [mainTournamentKey, dateStr, teams[0], teams[1]].join("|");
+      const crypto = await import("crypto");
+      const hash = crypto.createHash("md5").update(data).digest("hex").slice(0, 12);
+      m.matchId = `match_${hash}`;
+      m.lpNumericalId = BigInt("0x" + hash.substring(0, 15)) % 9007199254740991n;
+      m.tournamentId = mainResult.tournament.id;
+    }
+
+    // DEDUPLICATE internally before inserting to prevent unique constraint failures
+    const uniqueMatchesMap = new Map();
+    for (const m of allMatches) {
+      // If we already have this match, prefer the one with a date or more info
+      if (!uniqueMatchesMap.has(m.matchId)) {
+        uniqueMatchesMap.set(m.matchId, m);
+      } else {
+        const existing = uniqueMatchesMap.get(m.matchId);
+        // Merge: keep the first but override with richer data if available
+        uniqueMatchesMap.set(m.matchId, { ...existing, ...m, matchDate: existing.matchDate || m.matchDate });
+      }
+    }
+    const deduplicatedMatches = Array.from(uniqueMatchesMap.values());
+
     await prisma.tournamentMatch.createMany({
-      data: allMatches,
+      data: deduplicatedMatches,
       skipDuplicates: true
     });
   }

@@ -416,8 +416,6 @@ async function processSinglePage(params: {
             status: m.status,
             court: m.court,
             sourceUrl: m.sourceUrl,
-            lpNumericalId: m.lpNumericalId || lpIdMap.get(matchId) || null,
-            platformId: (m as any).platformId || matchPlatformMap.get(matchId) || null,
             rawText: m.rawText
           };
         });

@@ -527,34 +527,34 @@ function applyTbdPairCycling(matches: NormalizedMatch[], sourceTitle: string) {
   tbdMatches.forEach((m, idx) => {
     const matchTs = m.matchDate?.getTime() || 0;
     
-    let selectedPair = -1;
-    for (let p = 1; p <= 8; p++) {
-      if (matchTs - pairLastUsed[p] >= TWO_HOURS_MS || pairLastUsed[p] === 0) {
-        selectedPair = p;
-        break;
-      }
+    // Cycle every 8 matches (16 teams)
+    const cycle = Math.floor(idx / 8);
+    const subIdx = idx % 8;
+    
+    let tbdANum, tbdBNum;
+    
+    if (cycle % 2 === 0) {
+      // Standard pairs: (1,2), (3,4), (5,6), (7,8), (9,10), (11,12), (13,14), (15,16)
+      tbdANum = (subIdx * 2) + 1;
+      tbdBNum = (subIdx * 2) + 2;
+    } else {
+      // Crossed pairs: (1,3), (2,4), (5,7), (6,8), (9,11), (10,12), (13,15), (14,16)
+      const group = Math.floor(subIdx / 2); // 0, 1, 2, 3
+      const offset = subIdx % 2; // 0, 1
+      tbdANum = (group * 4) + offset + 1;
+      tbdBNum = (group * 4) + offset + 3;
     }
 
-    if (selectedPair === -1) {
-      selectedPair = 1;
-      let oldestTs = pairLastUsed[1];
-      for (let p = 2; p <= 8; p++) {
-        if (pairLastUsed[p] < oldestTs) {
-          oldestTs = pairLastUsed[p];
-          selectedPair = p;
-        }
-      }
-    }
-
-    const tbdA = `TBD${(selectedPair * 2) - 1}`;
-    const tbdB = `TBD${selectedPair * 2}`;
+    const tbdA = `TBD${tbdANum}`;
+    const tbdB = `TBD${tbdBNum}`;
     
     m.teamAName = tbdA;
     m.teamBName = tbdB;
     m.teamAId = `tbd_${tbdA.toLowerCase()}`;
     m.teamBId = `tbd_${tbdB.toLowerCase()}`;
     
-    pairLastUsed[selectedPair] = matchTs || (Date.now() + idx); // Fallback for sorting if no date
+    // Update last used time (for diagnostics/stability, though we now use a fixed pattern)
+    pairLastUsed[cycle % 8] = matchTs;
 
     // Recalculate IDs
     m.matchId = createStableMatchId({

@@ -532,34 +532,30 @@ function applyTbdPairCycling(matches: NormalizedMatch[], sourceTitle: string) {
   tbdMatches.forEach((m, idx) => {
     const matchTs = m.matchDate?.getTime() || 0;
     
-    let selectedPair = -1;
-    for (let p = 1; p <= 8; p++) {
-      if (matchTs - pairLastUsed[p] >= TWO_HOURS_MS || pairLastUsed[p] === 0) {
-        selectedPair = p;
-        break;
-      }
+    const cycle = Math.floor(idx / 8);
+    const subIdx = idx % 8;
+    
+    let tbdANum, tbdBNum;
+    
+    if (cycle % 2 === 0) {
+      tbdANum = (subIdx * 2) + 1;
+      tbdBNum = (subIdx * 2) + 2;
+    } else {
+      const group = Math.floor(subIdx / 2);
+      const offset = subIdx % 2;
+      tbdANum = (group * 4) + offset + 1;
+      tbdBNum = (group * 4) + offset + 3;
     }
 
-    if (selectedPair === -1) {
-      selectedPair = 1;
-      let oldestTs = pairLastUsed[1];
-      for (let p = 2; p <= 8; p++) {
-        if (pairLastUsed[p] < oldestTs) {
-          oldestTs = pairLastUsed[p];
-          selectedPair = p;
-        }
-      }
-    }
-
-    const tbdA = `TBD${(selectedPair * 2) - 1}`;
-    const tbdB = `TBD${selectedPair * 2}`;
+    const tbdA = `TBD${tbdANum}`;
+    const tbdB = `TBD${tbdBNum}`;
     
     m.teamAName = tbdA;
     m.teamBName = tbdB;
     m.teamAId = `tbd_${tbdA.toLowerCase()}`;
     m.teamBId = `tbd_${tbdB.toLowerCase()}`;
     
-    pairLastUsed[selectedPair] = matchTs || (Date.now() + idx);
+    pairLastUsed[cycle % 8] = matchTs;
 
     m.matchId = createStableMatchId({
       sourceTitle,

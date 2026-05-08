@@ -268,7 +268,8 @@ function extractMatchesFromParsedHtml(html: string, pageUrl: string): Normalized
     if (teamLink && !teamLink.includes("Time") && !teamLink.includes("(page does not exist)")) return teamLink;
     // 5. Fallback to .name text
     const nameText = $opp.find(".name").text().trim();
-    return nameText || null;
+    if (nameText) return nameText;
+    return "TBD";
   }
 
   // 1. Extract from matchlist matches (group stage — this is the primary format on Liquipedia CS)
@@ -281,7 +282,7 @@ function extractMatchesFromParsedHtml(html: string, pageUrl: string): Normalized
 
     const teamAName = getFullTeamName(oppCells.eq(0));
     const teamBName = getFullTeamName(oppCells.eq(1));
-    if (!teamAName && !teamBName) return;
+    // Allow TBD matches
 
     // Scores are in .brkts-matchlist-score cells
     const scoreCells = $match.find(".brkts-matchlist-score");
@@ -343,7 +344,7 @@ function extractMatchesFromParsedHtml(html: string, pageUrl: string): Normalized
 
     const teamAName = getFullTeamName(opponents.eq(0));
     const teamBName = getFullTeamName(opponents.eq(1));
-    if (!teamAName && !teamBName) return;
+    // Allow TBD matches
 
     const scoreAText = opponents.eq(0).find(".brkts-opponent-score-inner").text().trim();
     const scoreBText = opponents.eq(1).find(".brkts-opponent-score-inner").text().trim();

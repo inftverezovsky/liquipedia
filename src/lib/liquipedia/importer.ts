@@ -22,6 +22,9 @@ export async function importTournamentRecursive(params: {
 }) {
   const { disciplineId, disciplineSlug, apiUrl, pageId, title, pageUrl, normalizer, importRecordId, force } = params;
 
+  console.log(`[Importer] Starting import for ${title} (${disciplineSlug})`);
+  const startTime = Date.now();
+
   // 1. Process Main Page
   const mainResult = await processSinglePage({
     disciplineId,
@@ -38,11 +41,25 @@ export async function importTournamentRecursive(params: {
   // 2. Process Sub-pages (one level deep)
   if (mainResult.normalized.subPages && mainResult.normalized.subPages.length > 0) {
     console.log(`[Importer] Found ${mainResult.normalized.subPages.length} sub-pages for ${title}`);
-    for (const subUrl of mainResult.normalized.subPages) {
+    
+    // Prepare sub-page titles
+    const subPageTitles = mainResult.normalized.subPages.map(url => {
+      const decoded = decodeURIComponent(url.split("/").pop() ?? "").replace(/_/g, " ");
+      return decoded;
+    });
+
+    // 2.1 Bulk fetch wikitext for all sub-pages in one request
+    const { fetchPagesWikitext } = await import("@/lib/liquipedia/client");
+    const preFetchedWikitexts = await fetchPagesWikitext(apiUrl, disciplineSlug, subPageTitles);
+    const wikitextMap = new Map(preFetchedWikitexts.map(p => [p.title.toLowerCase(), p]));
+
+    // 2.2 Process all sub-pages in parallel
+    const subPromises = mainResult.normalized.subPages.map(async (subUrl) => {
       try {
-        // Extract title from URL
         const subTitle = decodeURIComponent(subUrl.split("/").pop() ?? "").replace(/_/g, " ");
-        await processSinglePage({
+        const preFetched = wikitextMap.get(subTitle.toLowerCase());
+
+        return processSinglePage({
           disciplineId,
           disciplineSlug,
           apiUrl,
@@ -51,14 +68,18 @@ export async function importTournamentRecursive(params: {
           normalizer,
           importRecordId,
           force,
-          tournamentId: mainResult.tournament.id // Link to main tournament
+          tournamentId: mainResult.tournament.id,
+          preFetchedWikitext: preFetched
         });
       } catch (err) {
         console.error(`[Importer] Failed to process sub-page ${subUrl}:`, err);
       }
-    }
+    });
+
+    await Promise.all(subPromises);
   }
 
+  console.log(`[Importer] Completed import for ${title} in ${Date.now() - startTime}ms`);
   return mainResult;
 }
 
@@ -73,8 +94,9 @@ async function processSinglePage(params: {
   importRecordId: string;
   tournamentId?: string;
   force?: boolean;
+  preFetchedWikitext?: any;
 }) {
-  const { disciplineSlug, apiUrl, pageId, title, pageUrl, normalizer, importRecordId, tournamentId, force } = params;
+  const { disciplineSlug, apiUrl, pageId, title, pageUrl, normalizer, importRecordId, tournamentId, force, preFetchedWikitext } = params;
 
   // 1. Check for cached snapshot (Default 1 hour cache, unless forced)
   const cacheThreshold = new Date(Date.now() - 1 * 60 * 60 * 1000); // 1 hour
@@ -101,15 +123,29 @@ async function processSinglePage(params: {
     currentPageId = cachedSnapshot.pageId ?? pageId;
   } else {
     // Fetch
-    console.log(`[Importer] Fetching fresh data for ${title}`);
-    const page = await fetchPageWikitext(apiUrl, disciplineSlug, { pageId, title });
-    wikitext = page.wikitext;
-    pageTitle = page.title ?? title;
-    rawJson = page.raw;
-    parsedHtml = await fetchPageParsed(apiUrl, pageTitle);
-    currentPageId = page.pageId ?? pageId;
+    console.log(`[Importer] Fetching data for ${title}`);
+    
+    if (preFetchedWikitext) {
+      wikitext = preFetchedWikitext.wikitext;
+      pageTitle = preFetchedWikitext.title;
+      rawJson = preFetchedWikitext.raw;
+      currentPageId = preFetchedWikitext.pageId;
+      // Still need to fetch parsed HTML
+      parsedHtml = await fetchPageParsed(apiUrl, pageTitle);
+    } else {
+      // Parallel fetch wikitext and parsed html
+      const [page, html] = await Promise.all([
+        fetchPageWikitext(apiUrl, disciplineSlug, { pageId, title }),
+        fetchPageParsed(apiUrl, title)
+      ]);
+      wikitext = page.wikitext;
+      pageTitle = page.title;
+      rawJson = page.raw;
+      parsedHtml = html;
+      currentPageId = page.pageId;
+    }
 
-    // Save Snapshot
+    // Save Snapshot (Fire and forget or wait? Better wait to ensure data integrity)
     await prisma.rawSnapshot.create({
       data: {
         tournamentImportId: importRecordId,
@@ -167,17 +203,22 @@ async function processSinglePage(params: {
 
   // Save Participants (only if not already there or merge)
   if (normalized.participants.length > 0) {
+    // Optimization: Bulk fetch ALL team mappings for this discipline once
+    const disciplineMappings = await prisma.teamMapping.findMany({
+      where: { disciplineSlug }
+    });
+    
+    const mappingMap = new Map(disciplineMappings.map(m => [m.liquipediaName.toLowerCase(), m]));
+    const aliasMap = new Map<string, any>();
+    disciplineMappings.forEach(m => {
+      if (m.alias) {
+        m.alias.split(',').forEach(a => aliasMap.set(a.trim().toLowerCase(), m));
+      }
+    });
+
     for (const p of normalized.participants) {
-      // Check for global mapping to inherit platformId (Check both Name and Alias)
-      const mapping = await prisma.teamMapping.findFirst({
-        where: {
-          disciplineSlug,
-          OR: [
-            { liquipediaName: { equals: p.name, mode: 'insensitive' } },
-            { alias: { contains: p.name, mode: 'insensitive' } }
-          ]
-        }
-      });
+      // Use in-memory maps instead of DB queries
+      const mapping = mappingMap.get(p.name.toLowerCase()) || aliasMap.get(p.name.toLowerCase());
 
       await prisma.tournamentParticipant.upsert({
         where: {
@@ -201,99 +242,109 @@ async function processSinglePage(params: {
       });
 
       // Save to global TeamMapping (initial or update logo)
-      await prisma.teamMapping.upsert({
-        where: {
-          disciplineSlug_liquipediaName: {
+      if (!mappingMap.has(p.name.toLowerCase())) {
+        await prisma.teamMapping.upsert({
+          where: {
+            disciplineSlug_liquipediaName: {
+              disciplineSlug,
+              liquipediaName: p.name
+            }
+          },
+          update: {
+            logoUrl: p.logoUrl || undefined
+          },
+          create: {
             disciplineSlug,
-            liquipediaName: p.name
+            liquipediaName: p.name,
+            logoUrl: p.logoUrl
           }
-        },
-        update: {
-          logoUrl: p.logoUrl || undefined
-        },
-        create: {
-          disciplineSlug,
-          liquipediaName: p.name,
-          logoUrl: p.logoUrl
-        }
-      });
+        });
+      }
     }
   }
 
   // Save Matches (detect conflicts)
   if (normalized.matches.length > 0) {
-    for (const m of normalized.matches) {
-      const matchId = m.matchId ?? `fallback_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-      
-      // Try to find existing by matchId OR lpNumericalId
-      let existing = await prisma.tournamentMatch.findUnique({ where: { matchId } });
-      if (!existing && m.lpNumericalId) {
-        existing = await prisma.tournamentMatch.findFirst({ 
-          where: { lpNumericalId: m.lpNumericalId } 
-        });
-      }
-      
-      if (existing) {
-        // Compare for conflicts
-        const hasConflict = 
-          existing.scoreA !== m.scoreA || 
-          existing.scoreB !== m.scoreB || 
-          existing.status !== m.status;
+    // Process matches in small batches to avoid overwhelming the DB connection
+    const matchChunks = [];
+    for (let i = 0; i < normalized.matches.length; i += 20) {
+      matchChunks.push(normalized.matches.slice(i, i + 20));
+    }
 
-        await prisma.tournamentMatch.update({
-          where: { matchId },
-          data: {
-            scoreA: m.scoreA,
-            scoreB: m.scoreB,
-            status: m.status,
-            matchDate: m.matchDate || existing.matchDate,
-            lpNumericalId: m.lpNumericalId || existing.lpNumericalId,
-            platformId: (m as any).platformId || existing.platformId,
-            // If conflict, we could log it or set a flag
-            rawText: hasConflict ? `CONFLICT: ${existing.scoreA}-${existing.scoreB} -> ${m.scoreA}-${m.scoreB}\n${m.rawText}` : m.rawText
-          }
-        });
-      } else {
-        await prisma.tournamentMatch.create({
-          data: {
-            matchId,
-            tournamentId: tournament.id,
-            stage: m.stage,
-            round: m.round,
-            matchDate: m.matchDate,
-            matchDateTime: m.matchDateTime,
-            teamAId: m.teamAId,
-            teamAName: m.teamAName,
-            teamBId: m.teamBId,
-            teamBName: m.teamBName,
-            scoreA: m.scoreA,
-            scoreB: m.scoreB,
-            format: m.format,
-            status: m.status,
-            court: m.court,
-            sourceUrl: m.sourceUrl,
-            lpNumericalId: m.lpNumericalId,
-            platformId: (m as any).platformId || undefined,
-            rawText: m.rawText
-          }
-        });
-      }
+    for (const chunk of matchChunks) {
+      await Promise.all(chunk.map(async (m) => {
+        const matchId = m.matchId ?? `fallback_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        
+        // Try to find existing by matchId OR lpNumericalId
+        let existing = await prisma.tournamentMatch.findUnique({ where: { matchId } });
+        if (!existing && m.lpNumericalId) {
+          existing = await prisma.tournamentMatch.findFirst({ 
+            where: { lpNumericalId: m.lpNumericalId } 
+          });
+        }
+        
+        if (existing) {
+          const hasConflict = 
+            existing.scoreA !== m.scoreA || 
+            existing.scoreB !== m.scoreB || 
+            existing.status !== m.status;
 
-      // Ensure TeamMapping for match teams too
-      if (m.teamAName && !m.teamAName.includes("TBD")) {
-        await prisma.teamMapping.upsert({
-          where: { disciplineSlug_liquipediaName: { disciplineSlug, liquipediaName: m.teamAName } },
-          update: {},
-          create: { disciplineSlug, liquipediaName: m.teamAName }
-        });
-      }
-      if (m.teamBName && !m.teamBName.includes("TBD")) {
-        await prisma.teamMapping.upsert({
-          where: { disciplineSlug_liquipediaName: { disciplineSlug, liquipediaName: m.teamBName } },
-          update: {},
-          create: { disciplineSlug, liquipediaName: m.teamBName }
-        });
-      }
+          await prisma.tournamentMatch.update({
+            where: { matchId },
+            data: {
+              scoreA: m.scoreA,
+              scoreB: m.scoreB,
+              status: m.status,
+              matchDate: m.matchDate || existing.matchDate,
+              lpNumericalId: m.lpNumericalId || existing.lpNumericalId,
+              platformId: (m as any).platformId || existing.platformId,
+              rawText: hasConflict ? `CONFLICT: ${existing.scoreA}-${existing.scoreB} -> ${m.scoreA}-${m.scoreB}\n${m.rawText}` : m.rawText
+            }
+          });
+        } else {
+          await prisma.tournamentMatch.create({
+            data: {
+              matchId,
+              tournamentId: tournament.id,
+              stage: m.stage,
+              round: m.round,
+              matchDate: m.matchDate,
+              matchDateTime: m.matchDateTime,
+              teamAId: m.teamAId,
+              teamAName: m.teamAName,
+              teamBId: m.teamBId,
+              teamBName: m.teamBName,
+              scoreA: m.scoreA,
+              scoreB: m.scoreB,
+              format: m.format,
+              status: m.status,
+              court: m.court,
+              sourceUrl: m.sourceUrl,
+              lpNumericalId: m.lpNumericalId,
+              platformId: (m as any).platformId || undefined,
+              rawText: m.rawText
+            }
+          });
+        }
+
+        // Ensure TeamMapping for match teams (Minimal overhead check)
+        const teamAName = m.teamAName;
+        const teamBName = m.teamBName;
+        if (teamAName && !teamAName.includes("TBD")) {
+           await prisma.teamMapping.upsert({
+             where: { disciplineSlug_liquipediaName: { disciplineSlug, liquipediaName: teamAName } },
+             update: {},
+             create: { disciplineSlug, liquipediaName: teamAName }
+           }).catch(() => {}); // Ignore concurrent insert errors
+        }
+        if (teamBName && !teamBName.includes("TBD")) {
+           await prisma.teamMapping.upsert({
+             where: { disciplineSlug_liquipediaName: { disciplineSlug, liquipediaName: teamBName } },
+             update: {},
+             create: { disciplineSlug, liquipediaName: teamBName }
+           }).catch(() => {});
+        }
+      }));
     }
   }
 

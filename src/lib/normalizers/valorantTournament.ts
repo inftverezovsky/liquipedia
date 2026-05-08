@@ -206,7 +206,9 @@ function extractMatchesFromParsedHtml(html: string, pageUrl: string): Normalized
     if (linkTitle && !linkTitle.includes("(page does not exist)")) return linkTitle;
     const teamLink = $opp.find("a[href*='/valorant/']").attr("title")?.trim();
     if (teamLink && !teamLink.includes("(page does not exist)")) return teamLink;
-    return $opp.find(".name").text().trim() || null;
+    const nameText = $opp.find(".name").text().trim();
+    if (nameText) return nameText;
+    return "TBD";
   }
 
   $(".brkts-matchlist-match, .brkts-match").each((_, matchEl) => {
@@ -216,7 +218,7 @@ function extractMatchesFromParsedHtml(html: string, pageUrl: string): Normalized
 
     const teamAName = getFullTeamName(oppCells.eq(0));
     const teamBName = getFullTeamName(oppCells.eq(1));
-    if (!teamAName && !teamBName) return;
+    // Allow TBD matches
 
     const scoreCells = $match.find(".brkts-matchlist-score, .brkts-opponent-score-inner");
     const scoreAText = scoreCells.eq(0).text().trim();
@@ -318,8 +320,20 @@ export function stringToNumericalId(str: string): bigint {
   return BigInt("0x" + hash);
 }
 
-function createStableMatchId(input: { sourceTitle: string; matchDate?: Date | null; teamAId: string; teamBId: string; extraHint: string }): string {
-  const data = [input.sourceTitle, input.matchDate?.toISOString() ?? "", input.teamAId, input.teamBId, input.extraHint].join("|");
+function createStableMatchId(input: { 
+  sourceTitle: string; 
+  matchDate?: Date | null; 
+  teamAId: string; 
+  teamBId: string; 
+  extraHint: string 
+}): string {
+  const data = [
+    input.sourceTitle, 
+    input.matchDate?.toISOString() ?? "", 
+    input.teamAId, 
+    input.teamBId, 
+    input.extraHint
+  ].join("|");
   return `match_${createHash("md5").update(data).digest("hex").slice(0, 12)}`;
 }
 

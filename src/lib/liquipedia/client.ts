@@ -238,47 +238,80 @@ export async function searchTournamentPages(query: string, apiUrl: string, disci
   return [];
 }
 
+export async function fetchPagesWikitext(apiUrl: string, disciplineSlug: string, titles: string[]): Promise<LiquipediaPageContent[]> {
+  if (titles.length === 0) return [];
+  
+  // MediaWiki allows up to 50 titles per request
+  const chunkSize = 50;
+  const results: LiquipediaPageContent[] = [];
+
+  for (let i = 0; i < titles.length; i += chunkSize) {
+    const chunk = titles.slice(i, i + chunkSize);
+    const params: Record<string, string> = {
+      action: "query",
+      format: "json",
+      formatversion: "2",
+      prop: "info|revisions",
+      inprop: "url",
+      rvprop: "content|timestamp|ids",
+      rvslots: "main",
+      redirects: "1",
+      titles: chunk.join("|")
+    };
+
+    const response = await apiRequest<PageApiResponse>(apiUrl, params);
+    const pages = response.query?.pages ?? [];
+
+    for (const page of pages) {
+      if (!page || page.missing) continue;
+      const revision = page.revisions?.[0];
+      const wikitext = revision?.slots?.main?.content ?? revision?.slots?.main?.["*"] ?? revision?.["*"] ?? "";
+      if (!wikitext) continue;
+
+      results.push({
+        pageId: page.pageid,
+        title: page.title,
+        fullUrl: page.fullurl ?? makeLiquipediaPageUrl(page.title, disciplineSlug),
+        wikitext,
+        raw: response
+      });
+    }
+  }
+
+  return results;
+}
+
 export async function fetchPageWikitext(apiUrl: string, disciplineSlug: string, input: { pageId?: number; title?: string }): Promise<LiquipediaPageContent> {
-  const params: Record<string, string> = {
-    action: "query",
-    format: "json",
-    formatversion: "2",
-    prop: "info|revisions",
-    inprop: "url",
-    rvprop: "content|timestamp|ids",
-    rvslots: "main",
-    redirects: "1"
-  };
-
+  const pages = await fetchPagesWikitext(apiUrl, disciplineSlug, input.title ? [input.title] : []);
+  if (pages.length > 0) return pages[0];
+  
+  // Fallback for pageId if still needed (rare)
   if (input.pageId) {
-    params.pageids = String(input.pageId);
-  } else if (input.title) {
-    params.titles = input.title;
-  } else {
-    throw new Error("fetchPageWikitext requires pageId or title");
+    const params: Record<string, string> = {
+      action: "query",
+      format: "json",
+      formatversion: "2",
+      prop: "info|revisions",
+      inprop: "url",
+      rvprop: "content|timestamp|ids",
+      rvslots: "main",
+      redirects: "1",
+      pageids: String(input.pageId)
+    };
+    const response = await apiRequest<PageApiResponse>(apiUrl, params);
+    const page = response.query?.pages?.[0];
+    if (!page || page.missing) throw new Error("Liquipedia page not found");
+    const revision = page.revisions?.[0];
+    return {
+      pageId: page.pageid,
+      title: page.title,
+      fullUrl: page.fullurl ?? makeLiquipediaPageUrl(page.title, disciplineSlug),
+      wikitext: revision?.slots?.main?.content ?? revision?.slots?.main?.["*"] ?? revision?.["*"] ?? "",
+      raw: response
+    };
   }
 
-  const response = await apiRequest<PageApiResponse>(apiUrl, params);
-  const page = response.query?.pages?.[0];
-
-  if (!page || page.missing) {
-    throw new Error("Liquipedia page not found");
-  }
-
-  const revision = page.revisions?.[0];
-  const wikitext = revision?.slots?.main?.content ?? revision?.slots?.main?.["*"] ?? revision?.["*"] ?? "";
-
-  if (!wikitext) {
-    throw new Error("Liquipedia page has no wikitext content in API response");
-  }
-
-  return {
-    pageId: page.pageid,
-    title: page.title,
-    fullUrl: page.fullurl ?? makeLiquipediaPageUrl(page.title, disciplineSlug),
-    wikitext,
-    raw: response
-  };
+  throw new Error("Liquipedia page not found");
 }
 
 export function makeLiquipediaPageUrl(title: string, disciplineSlug: string) {

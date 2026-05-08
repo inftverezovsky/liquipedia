@@ -262,7 +262,10 @@ function extractMatchesFromParsedHtml(html: string, pageUrl: string): Normalized
     const teamLink = $opp.find("a[href*='/dota2/']").attr("title")?.trim();
     if (teamLink && !teamLink.includes("Time") && !teamLink.includes("(page does not exist)")) return teamLink;
     const nameText = $opp.find(".name").text().trim();
-    return nameText || null;
+    if (nameText) return nameText;
+    
+    // If it's a bracket slot but empty, return TBD to ensure it's not skipped
+    return "TBD";
   }
 
   // 1. Extract from matchlist matches (group stage)
@@ -273,7 +276,7 @@ function extractMatchesFromParsedHtml(html: string, pageUrl: string): Normalized
 
     const teamAName = getFullTeamName(oppCells.eq(0));
     const teamBName = getFullTeamName(oppCells.eq(1));
-    if (!teamAName && !teamBName) return;
+    // We allow TBD matches now
 
     const scoreCells = $match.find(".brkts-matchlist-score");
     const scoreAText = scoreCells.eq(0).text().trim();
@@ -331,7 +334,7 @@ function extractMatchesFromParsedHtml(html: string, pageUrl: string): Normalized
 
     const teamAName = getFullTeamName(opponents.eq(0));
     const teamBName = getFullTeamName(opponents.eq(1));
-    if (!teamAName && !teamBName) return;
+    // We allow TBD matches now
 
     const scoreAText = opponents.eq(0).find(".brkts-opponent-score-inner").text().trim();
     const scoreBText = opponents.eq(1).find(".brkts-opponent-score-inner").text().trim();
@@ -563,11 +566,12 @@ function createStableMatchId(input: {
   
   const data = [
     tournamentKey,
-    input.matchDate?.getTime() ?? "", // Use timestamp instead of full ISO string which might vary
+    input.matchDate?.getTime() ?? "", 
     input.teamAId ?? "unknownA",
     input.teamBId ?? "unknownB",
     input.stage ?? "",
-    input.round ?? ""
+    input.round ?? "",
+    input.extraHint ?? ""
   ].join("|");
   const hash = createHash("md5").update(data).digest("hex").slice(0, 12);
   return `match_${hash}`;

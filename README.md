@@ -263,5 +263,5 @@ Body:
 - Любая загрузка только по кнопке пользователя.
 - Raw snapshot сохраняется до нормализации.
 - В каждой сущности хранить `sourceUrl`.
-- Показывать attribution/source link на Liquipedia.
+- Показывать attribution/source link на Liquipedia..
 - Не делать фоновые задачи без отдельного решения.

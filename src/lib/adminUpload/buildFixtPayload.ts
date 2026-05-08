@@ -105,6 +105,19 @@ export async function buildFixtPayload(
       continue;
     }
 
+    // 2.3 Skip finished matches (with result)
+    const hasScores = match.scoreA !== null || match.scoreB !== null;
+    const isFinished = match.status?.toLowerCase().includes('finished') || match.status?.toLowerCase().includes('completed');
+    
+    if (hasScores || isFinished) {
+      skippedMatches.push({
+        matchId: match.matchId,
+        reason: 'Match already finished (has score or finished status)',
+        teams: `${teamAName} (${match.scoreA ?? 0}:${match.scoreB ?? 0}) ${teamBName}`,
+      });
+      continue;
+    }
+
     // Format date in Moscow
     const moscowDate = DateTime.fromJSDate(match.matchDate)
       .setZone('Europe/Moscow')

@@ -309,10 +309,20 @@ async function processSinglePage(params: {
       // 1. Fetch existing platform mappings to preserve them
       const existingMatches = await prisma.tournamentMatch.findMany({
         where: { tournamentId: tournament.id },
-        select: { matchId: true, platformId: true, lpNumericalId: true }
+        select: { matchId: true, platformId: true, lpNumericalId: true, teamAName: true, teamBName: true, matchDate: true }
       });
       const matchPlatformMap = new Map(existingMatches.filter((em: any) => em.platformId).map((em: any) => [em.matchId, em.platformId]));
       const lpIdMap = new Map(existingMatches.filter((em: any) => em.lpNumericalId).map((em: any) => [em.matchId, em.lpNumericalId]));
+      
+      // Fallback map for when matchId logic changes
+      const fuzzyPlatformMap = new Map();
+      existingMatches.forEach((em: any) => {
+        if (em.platformId && em.teamAName && em.teamBName) {
+           const teams = [em.teamAName.toLowerCase(), em.teamBName.toLowerCase()].sort();
+           const dateStr = em.matchDate ? new Date(em.matchDate).toISOString().split('T')[0] : "";
+           fuzzyPlatformMap.set(`${dateStr}|${teams[0]}|${teams[1]}`, em.platformId);
+        }
+      });
 
       // 1.5 ALWAYS clear all matches first for a fresh start to avoid phantom duplicates
       await prisma.tournamentMatch.deleteMany({
@@ -339,13 +349,21 @@ async function processSinglePage(params: {
         })
         .map((m: any, idx: number) => {
           const matchId = m.matchId || `fallback_${Date.now()}_${idx}`;
+          
+          let platformId = matchPlatformMap.get(matchId) || null;
+          if (!platformId && m.teamAName && m.teamBName) {
+            const teams = [m.teamAName.toLowerCase(), m.teamBName.toLowerCase()].sort();
+            const dateStr = m.matchDate ? new Date(m.matchDate).toISOString().split('T')[0] : "";
+            platformId = fuzzyPlatformMap.get(`${dateStr}|${teams[0]}|${teams[1]}`) || null;
+          }
+
           return {
+            ...m,
             matchId,
             tournamentId: tournament.id,
-            stage: m.stage,
-            round: m.round,
-            matchDate: m.matchDate,
-            matchDateTime: m.matchDateTime,
+            platformId,
+            lpNumericalId: lpIdMap.get(matchId) || m.lpNumericalId || null,
+            syncedAt: null, // Reset sync status if re-imported
             teamAId: m.teamAId,
             teamAName: m.teamAName,
             teamBId: m.teamBId,

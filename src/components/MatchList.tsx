@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { isPlaceholderTeam } from "@/lib/teams";
 import { motion, AnimatePresence } from "framer-motion";
 import { Clock, Layers, LayoutGrid, CheckCircle2, History } from "lucide-react";
+import { DateTime } from "luxon";
 
 type Match = {
   id: string;
@@ -68,8 +69,10 @@ export default function MatchList({
   
   const [showAll, setShowAll] = useState(false);
   const [uploadHistory, setUploadHistory] = useState<any[]>([]);
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
+    setMounted(true);
     async function fetchHistory() {
       if (!tournamentId) return;
       try {
@@ -139,11 +142,8 @@ export default function MatchList({
   function formatNeutralDate(match: Match): string {
     const d = getMatchDateObj(match);
     if (!d) return "—";
-    return new Intl.DateTimeFormat("ru-RU", {
-      timeZone: "UTC",
-      day: "2-digit", month: "2-digit", year: "numeric",
-      hour: "2-digit", minute: "2-digit", hour12: false
-    }).format(d).replace(",", "");
+    // Always use Europe/Moscow for deterministic rendering
+    return DateTime.fromJSDate(d).setZone("Europe/Moscow").toFormat("dd.MM.yyyy HH:mm");
   }
 
   function TeamDisplay({ name, side }: { name: string | null; side: "left" | "right" }) {
@@ -237,7 +237,9 @@ export default function MatchList({
                       )}
                     </div>
                     <div className="flex items-center gap-4">
-                      <span className="text-xs font-bold text-slate-900 tabular-nums">{formatNeutralDate(match)}</span>
+                      <span suppressHydrationWarning className="text-xs font-bold text-slate-900 tabular-nums">
+                        {mounted ? formatNeutralDate(match) : "—"}
+                      </span>
                       <div className={`h-5 w-5 rounded-md border transition-all flex items-center justify-center ${
                         isSelected ? "bg-indigo-600 border-indigo-600" : "bg-white border-slate-200"
                       }`}>

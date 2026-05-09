@@ -1,37 +1,31 @@
-import PortalDisciplineCard from "@/components/PortalDisciplineCard";
-import { fetchDisciplinePortal } from "@/lib/liquipedia/portal";
+import { Suspense } from "react";
+import DisciplinePortalSection from "@/components/DisciplinePortalSection";
+import { DisciplineCardSkeleton } from "@/components/ui/Skeleton";
 
 export const dynamic = "force-dynamic";
 
-export default async function HomePage() {
-  const [dota, cs, lol, valorant] = await Promise.all([
-    fetchDisciplinePortal("dota2"),
-    fetchDisciplinePortal("counterstrike"),
-    fetchDisciplinePortal("leagueoflegends"),
-    fetchDisciplinePortal("valorant")
-  ]);
-
+export default function HomePage() {
   const disciplines = [
-    { data: dota, icon: "https://liquipedia.net/commons/images/0/07/Dota2_light.png", bg: "/dota2_bg_1777894185405.png" },
-    { data: cs, icon: "https://liquipedia.net/commons/images/c/c4/Counterstrike_light.png", bg: "/cs_bg_1777894203647.png" },
-    { data: lol, icon: "https://liquipedia.net/commons/images/e/e0/Leagueoflegends_light.png", bg: "/lol_bg_1777894223180.png" },
-    { data: valorant, icon: "https://liquipedia.net/commons/images/9/9e/Valorant_light.png", bg: "/valorant_bg_1777894248851.png" }
+    { slug: "dota2", icon: "https://liquipedia.net/commons/images/0/07/Dota2_light.png", bg: "/dota2_bg_1777894185405.png" },
+    { slug: "counterstrike", icon: "https://liquipedia.net/commons/images/c/c4/Counterstrike_light.png", bg: "/cs_bg_1777894203647.png" },
+    { slug: "leagueoflegends", icon: "https://liquipedia.net/commons/images/e/e0/Leagueoflegends_light.png", bg: "/lol_bg_1777894223180.png" },
+    { slug: "valorant", icon: "https://liquipedia.net/commons/images/9/9e/Valorant_light.png", bg: "/valorant_bg_1777894248851.png" }
   ];
 
   return (
     <div className="space-y-12">
       <div className="grid gap-10 lg:grid-cols-2">
         {disciplines.map((d) => (
-          <PortalDisciplineCard
-            key={d.data.slug}
-            slug={d.data.slug}
-            name={d.data.name}
-            iconUrl={d.icon}
-            bgUrl={d.bg}
-            tournaments={d.data.tournaments}
-          />
+          <Suspense key={d.slug} fallback={<DisciplineCardSkeleton />}>
+            <DisciplinePortalSection 
+              slug={d.slug} 
+              icon={d.icon} 
+              bg={d.bg} 
+            />
+          </Suspense>
         ))}
       </div>
     </div>
   );
 }
+

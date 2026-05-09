@@ -60,14 +60,15 @@ export async function searchTournamentPages(query: string, apiUrl: string, disci
   const allTitlesSet = new Set<string>();
   const titleToUrl = new Map<string, string>();
 
-  for (const v of variations) {
+  // Run variations in parallel to save time
+  await Promise.all(variations.map(async (v) => {
     try {
       // 1. Prefix search (Opensearch)
       const openResponse = await apiRequest<SearchApiResponse>(apiUrl, {
         action: "opensearch",
         format: "json",
         search: v,
-        limit: "100"
+        limit: "50"
       });
       const openTitles = openResponse[1] ?? [];
       const openUrls = openResponse[3] ?? [];
@@ -81,7 +82,7 @@ export async function searchTournamentPages(query: string, apiUrl: string, disci
         action: "query",
         list: "search",
         srsearch: v,
-        srlimit: "100",
+        srlimit: "50",
         format: "json"
       });
       const searchTitles = searchResponse.query?.search?.map(s => s.title) ?? [];
@@ -89,7 +90,7 @@ export async function searchTournamentPages(query: string, apiUrl: string, disci
     } catch (err) {
       console.error(`Search variation "${v}" failed:`, err);
     }
-  }
+  }));
 
   const allTitles = Array.from(allTitlesSet);
   if (allTitles.length > 0) {
@@ -336,6 +337,44 @@ export async function fetchPageParsed(apiUrl: string, title: string): Promise<st
   return response.parse?.text?.["*"] ?? "";
 }
 
+import { HttpsProxyAgent } from "https-proxy-agent";
+import { SocksProxyAgent } from "socks-proxy-agent";
+import { prisma } from "@/lib/db";
+import nodeFetch from "node-fetch";
+
+export async function fetchHtml(url: string): Promise<string> {
+  const fetchOptions: any = {
+    method: "GET",
+    headers: {
+      "User-Agent": getLiquipediaUserAgent(),
+      "Accept-Encoding": "gzip",
+      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8"
+    }
+  };
+
+  const settings = await prisma.globalSettings.findMany({
+    where: { key: { in: ['proxy_host', 'proxy_port', 'proxy_username', 'proxy_password'] } }
+  });
+  const config = settings.reduce((acc, s) => ({ ...acc, [s.key]: s.value }), {} as Record<string, string>);
+  
+  if (config.proxy_host && config.proxy_port) {
+    const isSocks = config.proxy_host.startsWith('socks') || config.proxy_port === '10800'; 
+    let protocol = isSocks ? 'socks5' : 'http';
+    let proxyStr = `${protocol}://`;
+    if (config.proxy_username && config.proxy_password) {
+      proxyStr += `${config.proxy_username}:${config.proxy_password}@`;
+    }
+    proxyStr += `${config.proxy_host.replace(/^(socks5:\/\/|http:\/\/)/, '')}:${config.proxy_port}`;
+    fetchOptions.agent = isSocks ? new SocksProxyAgent(proxyStr) : new HttpsProxyAgent(proxyStr);
+  }
+
+  const response = await nodeFetch(url, fetchOptions as any);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch HTML ${response.status} from ${url}`);
+  }
+  return response.text();
+}
+
 export async function apiRequest<T>(apiUrl: string, params: Record<string, string>, isParse = false): Promise<T> {
   const execute = async () => {
     const url = new URL(apiUrl);
@@ -345,35 +384,70 @@ export async function apiRequest<T>(apiUrl: string, params: Record<string, strin
 
     console.log(`[Liquipedia API Request] URL: ${url.toString()}`);
 
-    const response = await fetch(url.toString(), {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 45000);
+
+    const userAgent = getLiquipediaUserAgent();
+    const finalUserAgent = userAgent.includes("change-me") 
+      ? "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 (TCyber/1.0)"
+      : userAgent;
+
+    const fetchOptions: any = {
       method: "GET",
       headers: {
-        "User-Agent": getLiquipediaUserAgent(),
+        "User-Agent": finalUserAgent,
         "Accept-Encoding": "gzip",
         Accept: "application/json"
-      }
+      },
+      signal: controller.signal
+    };
+
+    // Load proxy settings
+    const settings = await prisma.globalSettings.findMany({
+      where: { key: { in: ['proxy_host', 'proxy_port', 'proxy_username', 'proxy_password'] } }
     });
+    const config = settings.reduce((acc, s) => ({ ...acc, [s.key]: s.value }), {} as Record<string, string>);
+    
+    if (config.proxy_host && config.proxy_port) {
+      const isSocks = config.proxy_host.startsWith('socks') || config.proxy_port === '10800'; 
+      let protocol = isSocks ? 'socks5' : 'http';
+      
+      let proxyStr = `${protocol}://`;
+      if (config.proxy_username && config.proxy_password) {
+        proxyStr += `${config.proxy_username}:${config.proxy_password}@`;
+      }
+      proxyStr += `${config.proxy_host.replace(/^(socks5:\/\/|http:\/\/)/, '')}:${config.proxy_port}`;
+      
+      try {
+        fetchOptions.agent = isSocks ? new SocksProxyAgent(proxyStr) : new HttpsProxyAgent(proxyStr);
+        console.log(`[Liquipedia API] Using ${protocol.toUpperCase()} Proxy: ${config.proxy_host}:${config.proxy_port}`);
+      } catch (proxyErr) {
+        console.error(`[Liquipedia API] Proxy Agent Init Error:`, proxyErr);
+      }
+    }
+
+    const response = await nodeFetch(url.toString(), fetchOptions as any).finally(() => clearTimeout(timeoutId));
 
     const contentType = response.headers.get("content-type") || "";
     console.log(`[Liquipedia API Response] Status: ${response.status}, Content-Type: ${contentType}`);
 
     if (!response.ok) {
       const text = await response.text();
-      console.log(`[Liquipedia API Error Body] ${text.slice(0, 120)}`);
+      console.log(`[Liquipedia API Error Body] ${text.slice(0, 500)}`);
       throw new Error(`Liquipedia API error ${response.status}: ${text.slice(0, 300)}`);
     }
 
     if (!contentType.includes("application/json") && !contentType.includes("application/mediawiki+json")) {
       const text = await response.text();
-      console.log(`[Liquipedia API Non-JSON Body] ${text.slice(0, 120)}`);
-      throw new Error(`Liquipedia API returned non-JSON response. Content-Type: ${contentType}. Check API URL, User-Agent, rate limit, or blocked request.`);
+      console.log(`[Liquipedia API Non-JSON Body] ${text.slice(0, 500)}`);
+      throw new Error(`Liquipedia API returned non-JSON response. This usually means the request was blocked by Cloudflare or Liquipedia. (Status: ${response.status})`);
     }
 
     const text = await response.text();
     try {
       return JSON.parse(text) as T;
     } catch {
-      throw new Error(`Liquipedia API returned invalid JSON. Body: ${text.slice(0, 120)}`);
+      throw new Error(`Liquipedia API returned invalid JSON. Body length: ${text.length}`);
     }
   };
 

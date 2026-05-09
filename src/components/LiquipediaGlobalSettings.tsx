@@ -11,7 +11,11 @@ const DEFAULT_SETTINGS = {
   "generic_interval": "2100",
   "parse_interval": "31000",
   "admin_api_url": "",
-  "admin_sport_id": "73"
+  "admin_sport_id": "73",
+  "proxy_host": "geo.g-w.info",
+  "proxy_port": "10080",
+  "proxy_username": "",
+  "proxy_password": ""
 };
 
 export default function LiquipediaGlobalSettings() {
@@ -102,6 +106,36 @@ export default function LiquipediaGlobalSettings() {
           
           <dl className="grid gap-6">
             <SettingsRow 
+              label="Прокси-хост" 
+              name="proxy_host"
+              value={settings.proxy_host} 
+              isEditing={isEditing}
+              onChange={(val) => setSettings({ ...settings, proxy_host: val })}
+            />
+            <SettingsRow 
+              label="Порт" 
+              name="proxy_port"
+              value={settings.proxy_port} 
+              isEditing={isEditing}
+              onChange={(val) => setSettings({ ...settings, proxy_port: val })}
+            />
+            <SettingsRow 
+              label="Логин" 
+              name="proxy_username"
+              value={settings.proxy_username} 
+              isEditing={isEditing}
+              onChange={(val) => setSettings({ ...settings, proxy_username: val })}
+            />
+            <SettingsRow 
+              label="Пароль" 
+              name="proxy_password"
+              value={settings.proxy_password} 
+              isEditing={isEditing}
+              type="password"
+              onChange={(val) => setSettings({ ...settings, proxy_password: val })}
+            />
+            <div className="h-px bg-slate-100 my-4" />
+            <SettingsRow 
               label="Dota 2 API" 
               name="dota2_api"
               value={settings.dota2_api} 
@@ -172,11 +206,12 @@ export default function LiquipediaGlobalSettings() {
   );
 }
 
-function SettingsRow({ label, name, value, isEditing, onChange }: { 
+function SettingsRow({ label, name, value, isEditing, type = "text", onChange }: { 
   label: string; 
   name: string;
   value: string; 
   isEditing: boolean;
+  type?: string;
   onChange: (val: string) => void;
 }) {
   return (
@@ -185,14 +220,14 @@ function SettingsRow({ label, name, value, isEditing, onChange }: {
       <dd>
         {isEditing ? (
           <input 
-            type="text"
+            type={type}
             className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-950 focus:outline-none focus:ring-4 focus:ring-indigo-600/5 focus:border-indigo-600 transition-all"
             value={value}
             onChange={(e) => onChange(e.target.value)}
           />
         ) : (
           <span className="break-all text-sm font-bold text-slate-900 font-mono bg-slate-50 px-4 py-2 rounded-xl border border-slate-100 block w-fit">
-            {value} {label.includes("ms") ? "" : ""}
+            {type === 'password' ? '********' : value} {label.includes("ms") ? "" : ""}
           </span>
         )}
       </dd>

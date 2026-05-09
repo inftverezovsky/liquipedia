@@ -38,3 +38,27 @@ export function MatchSkeleton() {
     </div>
   );
 }
+export function DisciplineCardSkeleton() {
+  return (
+    <div className="flex flex-col overflow-hidden rounded-[2rem] bg-white border border-slate-200 shadow-sm">
+      <div className="relative h-48 w-full bg-slate-100 overflow-hidden">
+        <Skeleton className="h-full w-full bg-slate-200" />
+        <div className="absolute bottom-6 left-8 flex items-center gap-4">
+          <Skeleton className="h-12 w-12 rounded-xl bg-white shadow-lg" />
+          <Skeleton className="h-10 w-48 bg-white/50" />
+        </div>
+      </div>
+      <div className="p-8 space-y-4">
+        <div className="grid gap-3 sm:grid-cols-2">
+          {[...Array(6)].map((_, i) => (
+            <Skeleton key={i} className="h-24 rounded-2xl bg-slate-50" />
+          ))}
+        </div>
+        <div className="mt-8 flex gap-3">
+          <Skeleton className="h-12 flex-1 rounded-xl bg-slate-50" />
+          <Skeleton className="h-12 flex-1 rounded-xl bg-indigo-50" />
+        </div>
+      </div>
+    </div>
+  );
+}

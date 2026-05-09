@@ -69,6 +69,7 @@ export async function POST(
       status: sendResult.status,
       rawResponse: sendResult.rawResponse,
       errorMessage: sendResult.errorMessage,
+      error: sendResult.status === 'failed' ? (sendResult.errorMessage || "Ошибка при отправке данных в платформу") : undefined
     });
   } catch (error: any) {
     console.error('Send error:', error);

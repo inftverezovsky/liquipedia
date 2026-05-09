@@ -25,11 +25,24 @@ export async function POST(request: Request) {
     const mappings = await prisma.teamMapping.findMany({
       where: {
         disciplineSlug,
-        liquipediaName: { in: Array.from(teamNames) }
+        OR: [
+          { liquipediaName: { in: Array.from(teamNames) } },
+          { alias: { in: Array.from(teamNames) } }
+        ]
       }
     });
 
-    const mappingMap = new Map(mappings.map(m => [m.liquipediaName, m]));
+    // Build a lookup map that handles both canonical names and aliases
+    const mappingMap = new Map<string, any>();
+    mappings.forEach(m => {
+      if (m.liquipediaName) mappingMap.set(m.liquipediaName.toLowerCase(), m);
+      if (m.alias) {
+        const aliases = m.alias.split(',').map(a => a.trim().toLowerCase());
+        aliases.forEach(a => {
+          if (a) mappingMap.set(a, m);
+        });
+      }
+    });
 
     // 3. Get target URL from settings
     const targetUrlSetting = await prisma.globalSettings.findUnique({ where: { key: "external_platform_url" } });
@@ -41,8 +54,8 @@ export async function POST(request: Request) {
 
     // 4. Prepare data for the external platform
     const payload = matches.map(m => {
-      const teamA = mappingMap.get(m.teamAName || "");
-      const teamB = mappingMap.get(m.teamBName || "");
+      const teamA = mappingMap.get((m.teamAName || "").toLowerCase());
+      const teamB = mappingMap.get((m.teamBName || "").toLowerCase());
 
       return {
         externalId: m.id,

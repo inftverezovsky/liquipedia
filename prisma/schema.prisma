@@ -124,6 +124,7 @@ model Tournament {
   @@unique([disciplineSlug, sourceTitle])
   @@index([sourcePageId])
   @@index([name])
+  @@index([sourceUrl])
 }
 
 model TournamentParticipant {

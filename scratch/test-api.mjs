@@ -1,10 +1,19 @@
-import fs from 'fs';
-fetch("http://localhost:3010/api/dota2/search-tournament", {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({ query: "Riyadh Masters" })
-}).then(async r => {
-  const text = await r.text();
-  fs.writeFileSync("scratch/error.html", text);
-  console.log("Written to scratch/error.html");
-}).catch(console.error);
+
+async function test() {
+  const url = "http://localhost:3010/api/counterstrike/portal";
+  console.log(`Fetching ${url}...`);
+  try {
+    const res = await fetch(url);
+    console.log(`Status: ${res.status}`);
+    const json = await res.json();
+    if (!res.ok) {
+      console.error("Error response:", json);
+    } else {
+      console.log(`Success! Found ${json.tournaments.length} tournaments.`);
+    }
+  } catch (e) {
+    console.error("Fetch failed:", e);
+  }
+}
+
+test();

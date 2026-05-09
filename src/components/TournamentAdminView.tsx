@@ -20,7 +20,7 @@ export default function TournamentAdminView({ tournament: initialTournament, map
 
   // SWR for caching (SAFE: Only hits local DB, not Liquipedia)
   const { data: tournament, mutate } = useSWR(
-    `/api/${disciplineSlug}/tournament/${initialTournament.id}/data`,
+    `/api/${disciplineSlug}/tournament/${initialTournament.id}`,
     fetcher,
     { 
       fallbackData: initialTournament, 
@@ -81,7 +81,11 @@ export default function TournamentAdminView({ tournament: initialTournament, map
           animate={{ opacity: 1, x: 0 }}
           transition={{ delay: 0.2 }}
         >
-          <ExportPanel tournamentId={tournament.id} disciplineSlug={disciplineSlug} />
+          <ExportPanel 
+            tournamentId={tournament.id} 
+            disciplineSlug={disciplineSlug} 
+            selectedMatchIds={Array.from(selectedIds)}
+          />
         </motion.div>
       </div>
     </motion.div>

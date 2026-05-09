@@ -38,9 +38,7 @@ export async function GET(_request: Request, { params }: { params: { id: string 
   });
 
   return NextResponse.json({ 
-    tournament: {
-      ...tournament,
-      matches: Array.from(uniqueMatches.values())
-    }
+    ...tournament,
+    matches: Array.from(uniqueMatches.values())
   });
 }

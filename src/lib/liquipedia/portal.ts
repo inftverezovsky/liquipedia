@@ -1,5 +1,7 @@
 import * as cheerio from "cheerio";
 import { getLiquipediaUserAgent } from "../env";
+import { getPortalCache } from "../db";
+import { fetchHtml } from "./client";
 
 export type PortalTournament = {
   title: string;
@@ -14,7 +16,35 @@ export type DisciplinePortalData = {
   tournaments: PortalTournament[];
 };
 
-export async function fetchDisciplinePortal(slug: string): Promise<DisciplinePortalData> {
+const CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+
+export async function fetchDisciplinePortal(slug: string, force = false): Promise<DisciplinePortalData> {
+  const cacheKey = slug;
+  const portalCache = getPortalCache();
+  
+  if (!force) {
+    const cached = portalCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+      console.log(`[Portal Lib] Returning in-memory cache for ${slug}`);
+      return cached.data;
+    }
+  }
+
+  // Absolute timeout of 15 seconds for the entire operation
+  return Promise.race([
+    internalFetchDisciplinePortal(slug, force),
+    new Promise<DisciplinePortalData>((resolve) => 
+      setTimeout(() => {
+        console.warn(`[Portal Lib] TIMEOUT reached for ${slug}, returning cached/empty`);
+        const cached = portalCache.get(cacheKey);
+        resolve(cached?.data || { slug, name: slug, tournaments: [] });
+      }, 15000)
+    )
+  ]);
+}
+
+async function internalFetchDisciplinePortal(slug: string, force = false): Promise<DisciplinePortalData> {
+  const cacheKey = slug;
   const urls = [`https://liquipedia.net/${slug}/Main_Page`];
   if (slug === 'leagueoflegends') {
     urls.push(`https://liquipedia.net/leagueoflegends/Portal:Tournaments`);
@@ -24,23 +54,22 @@ export async function fetchDisciplinePortal(slug: string): Promise<DisciplinePor
   try {
     for (const url of urls) {
       try {
-        const res = await fetch(url, {
-          headers: { "User-Agent": getLiquipediaUserAgent() },
-          next: { revalidate: 0 }
-        });
-        if (res.ok) {
-          const content = await res.text();
-          if (content.length > 5000) {
-            html = content;
-            break;
-          }
+        console.log(`[Portal Lib] Fetching ${url} via Proxy`);
+        const content = await fetchHtml(url);
+        if (content.length > 5000) {
+          html = content;
+          break;
         }
       } catch (e) {
-        console.error(`Failed to fetch ${url}:`, e);
+        console.error(`[Portal Lib] Failed to fetch ${url}:`, e);
       }
     }
 
-    if (!html) return { slug, name: slug, tournaments: [] };
+    if (!html) {
+      const cached = getPortalCache().get(cacheKey);
+      if (cached) return cached.data;
+      return { slug, name: slug, tournaments: [] };
+    }
     
     const $ = cheerio.load(html);
     const tournaments: PortalTournament[] = [];
@@ -165,11 +194,20 @@ export async function fetchDisciplinePortal(slug: string): Promise<DisciplinePor
 
     const filtered = enriched.filter(t => {
       if (t.status === 'ongoing') return true;
-      if (!t.startDate || !t.endDate) return t.status !== 'completed';
+      if (t.status === 'completed') return false; // Never show completed
+      
+      if (!t.startDate || !t.endDate) {
+        // If we can't parse dates, only show if it was explicitly "upcoming"
+        return t.status === 'upcoming';
+      }
+
+      // If it ended yesterday or earlier, hide it
       if (t.endDate.getTime() < now.getTime() - 1000 * 60 * 60 * 24) return false;
+      
       if (t.status === 'upcoming') {
         const diffDays = (t.startDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
-        return diffDays <= 7;
+        // User requested: "only those that will be in 7 days no later"
+        return diffDays >= -1 && diffDays <= 7;
       }
       return true;
     });
@@ -190,13 +228,20 @@ export async function fetchDisciplinePortal(slug: string): Promise<DisciplinePor
       valorant: "Valorant"
     };
 
-    return {
+    const result = {
       slug,
       name: nameMapping[slug] || (slug.charAt(0).toUpperCase() + slug.slice(1)),
       tournaments: sortedTournaments.slice(0, 15)
     };
+
+    getPortalCache().set(cacheKey, { data: result, timestamp: Date.now() });
+    return result;
   } catch (err) {
-    console.error(`Error in fetchDisciplinePortal for ${slug}:`, err);
+    console.error(`[Portal Lib] Error in fetchDisciplinePortal for ${slug}:`, err);
+    const cached = getPortalCache().get(cacheKey);
+    if (cached) return cached.data;
     return { slug, name: slug, tournaments: [] };
   }
 }
+
+

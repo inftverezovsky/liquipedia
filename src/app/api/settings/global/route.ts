@@ -1,18 +1,32 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { requireAdmin } from "@/lib/adminAuth";
 
-export async function GET() {
+export const dynamic = "force-dynamic";
+
+export async function GET(request: Request) {
+  const unauthorized = await requireAdmin(request);
+  if (unauthorized) return unauthorized;
+
   const settings = await prisma.globalSettings.findMany();
-  const config = settings.reduce((acc, s) => ({ ...acc, [s.key]: s.value }), {});
-  return NextResponse.json(config);
+  const config = settings.reduce((acc, s) => {
+    if (isSecretSetting(s.key)) return acc;
+    return { ...acc, [s.key]: s.value };
+  }, {});
+  return NextResponse.json(config, { headers: { "Cache-Control": "no-store" } });
 }
 
 export async function POST(request: Request) {
+  const unauthorized = await requireAdmin(request);
+  if (unauthorized) return unauthorized;
+
   try {
     const body = await request.json();
     const entries = Object.entries(body);
 
     for (const [key, value] of entries) {
+      if (isSecretSetting(key) && String(value) === "") continue;
+
       await prisma.globalSettings.upsert({
         where: { key },
         update: { value: String(value) },
@@ -24,4 +38,8 @@ export async function POST(request: Request) {
   } catch (err) {
     return NextResponse.json({ error: "Failed to save settings" }, { status: 500 });
   }
+}
+
+function isSecretSetting(key: string) {
+  return /password|secret|token|api[_-]?key/i.test(key);
 }

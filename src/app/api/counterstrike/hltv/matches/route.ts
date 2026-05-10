@@ -1,75 +1,55 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { exec } from "child_process";
-import { promisify } from "util";
-import path from "path";
-
-const execAsync = promisify(exec);
+import { runHltvScript } from "@/lib/hltv/scraper";
+import { classifyParserError, emptyValidIfNoItems } from "@/lib/parserErrors";
+import { getTeamAliasKey, getTeamMappingLookupKeys } from "@/lib/teams/canonicalize";
+import { normalizeTeamName } from "@/lib/teams";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    // 1. Get proxy settings
-    const settings = await prisma.globalSettings.findMany({
-      where: { key: { in: ['proxy_host', 'proxy_port', 'proxy_username', 'proxy_password'] } }
-    });
-    const config = settings.reduce((acc, s) => ({ ...acc, [s.key]: s.value }), {} as Record<string, string>);
-    
-    let proxyArg = "";
-    if (config.proxy_host && config.proxy_port) {
-      const isSocks = config.proxy_host.startsWith('socks') || config.proxy_port === '10800';
-      const protocol = isSocks ? 'socks5' : 'http';
-      
-      let proxyStr = `${protocol}://`;
-      if (config.proxy_username && config.proxy_password) {
-        proxyStr += `${config.proxy_username}:${config.proxy_password}@`;
-      }
-      proxyStr += `${config.proxy_host.replace(/^(socks5:\/\/|http:\/\/)/, '')}:${config.proxy_port}`;
-      proxyArg = `--proxy "${proxyStr}"`;
-    }
-
-    // 2. Run the Playwright scraper script
-    const command = `node scripts/hltv_playwright.mjs ${proxyArg}`;
-    console.log(`[HLTV API] Running playwright scraper: ${command}`);
-
-    const hltvMatches = await new Promise((resolve, reject) => {
-      exec(command, (error, stdout, stderr) => {
-        if (error) {
-          console.error(`[HLTV API] Exec error: ${error}`);
-          return reject(new Error(`Scraper execution failed: ${error.message}`));
-        }
-
-        try {
-          // Playwright script might output multiple lines, we need the JSON one
-          const lines = stdout.trim().split('\n');
-          const lastLine = lines[lines.length - 1];
-          const data = JSON.parse(lastLine);
-          
-          if (data.ok) {
-            resolve(data.matches);
-          } else {
-            console.error(`[HLTV API] Scraper error: ${data.error}`);
-            reject(new Error(`HLTV Scraper Error: ${data.error}`));
-          }
-        } catch (e) {
-          console.error(`[HLTV API] Parse error. Stdout: ${stdout}`);
-          reject(new Error("Failed to parse scraper output"));
-        }
-      });
-    });
+    const { searchParams } = new URL(request.url);
+    const force = searchParams.get("force") === "true";
+    // 2. Run the Playwright scraper script via the lib
+    const data = await runHltvScript('scrape', undefined, { noCache: force });
+    const hltvMatches = Array.isArray(data.matches) ? data.matches : [];
 
     // 2. Get all team mappings for Counter-Strike
     const mappings = await prisma.teamMapping.findMany({
       where: { disciplineSlug: "counterstrike" }
     });
 
-    const mappingMap = new Map(mappings.map(m => [m.liquipediaName.toLowerCase(), m]));
+    const mappingMap = new Map<string, (typeof mappings)[number]>();
+    for (const mapping of mappings) {
+      for (const key of getTeamMappingLookupKeys(mapping)) {
+        mappingMap.set(key.toLowerCase(), mapping);
+      }
+    }
 
-    // 3. Transform and map
+    // 3. Transform and map with fuzzy matching support
+    const findTeamMapping = (name: string) => {
+      if (!name) return null;
+      const lower = name.toLowerCase();
+      const normalized = normalizeTeamName(name);
+      const aliasKey = getTeamAliasKey(name);
+      // Exact match
+      if (mappingMap.has(lower)) return mappingMap.get(lower);
+      if (mappingMap.has(normalized)) return mappingMap.get(normalized);
+      if (mappingMap.has(aliasKey)) return mappingMap.get(aliasKey);
+      // Fuzzy match (includes)
+      for (const m of mappings) {
+        const dbName = m.liquipediaName.toLowerCase();
+        if (lower.includes(dbName) || dbName.includes(lower)) {
+          if (dbName.length > 3) return m;
+        }
+      }
+      return null;
+    };
+
     const matches = (hltvMatches as any[]).map((m: any) => {
-      const teamA = mappingMap.get(m.team1.toLowerCase());
-      const teamB = mappingMap.get(m.team2.toLowerCase());
+      const teamA = findTeamMapping(m.team1);
+      const teamB = findTeamMapping(m.team2);
 
       // Format date from unix timestamp
       const date = new Date(m.unix_time * 1000);
@@ -91,16 +71,27 @@ export async function GET() {
           platformId: teamB?.platformId || null,
         },
         date: dateStr,
-        isReady: !!teamA?.platformId && !!teamB?.platformId
+        isReady: !!teamA?.platformId && !!teamB?.platformId,
+        isLive: !!m.isLive
       };
     });
 
-    return NextResponse.json({ ok: true, matches });
+    return NextResponse.json({
+      ok: true,
+      matches,
+      cacheHit: !!data.cacheHit,
+      cacheLayer: data.cacheLayer || null,
+      stale: !!data.stale,
+      warning: data.warning || null,
+      errorClass: data.errorClass || emptyValidIfNoItems([hltvMatches.length]),
+    });
   } catch (error: any) {
+    const errorClass = classifyParserError({ message: error.message });
     console.error('[HLTV Scrape Route] Error:', error);
     return NextResponse.json({ 
       ok: false, 
-      error: error.message 
+      error: error.message,
+      errorClass,
     }, { status: 500 });
   }
 }

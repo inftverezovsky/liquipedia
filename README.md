@@ -72,7 +72,7 @@ http://localhost:3010
 5. В настройках **Variables** сервиса `web` убедитесь, что `DATABASE_URL` подтянулся автоматически (или пропишите его вручную из настроек PostgreSQL).
 6. Добавьте переменную `LIQUIPEDIA_USER_AGENT`.
 
-Проект сам выполнит `prisma db push` и `prisma db seed` при каждом деплое.
+Проект выполняет `prisma migrate deploy` при старте контейнера. Seed запускайте отдельно командой `npm run db:seed`, чтобы рестарт приложения не перезаписывал настройки.
 
 ## Обязательно поправить `.env`
 
@@ -83,6 +83,38 @@ LIQUIPEDIA_USER_AGENT="liquipedia-local-dev/0.1 (https://your-domain.example; yo
 ```
 
 Liquipedia требует понятный custom User-Agent с контактами проекта. Не оставляй `change-me@example.com` для реальных запросов.
+
+## Проверки качества
+
+Локальный набор проверок:
+
+```bash
+npm run typecheck
+npm run lint
+npm test
+npm audit --audit-level=moderate
+npm run build
+npm run test:e2e
+```
+
+`npm run test:e2e` поднимает `next dev` через Playwright и проверяет главную страницу, admin auth API и парольный gate настроек. DB-backed FIxt integration включается отдельно, чтобы случайно не писать в dev/prod базу:
+
+```bash
+DATABASE_URL="postgresql://postgres:postgres@127.0.0.1:5432/liquipedia_test" npm run test:e2e:db
+```
+
+В PowerShell:
+
+```powershell
+$env:DATABASE_URL="postgresql://postgres:postgres@127.0.0.1:5432/liquipedia_test"
+npm run test:e2e:db
+```
+
+В CI этот тест запускается против отдельного PostgreSQL service и мокает внешнюю админ-платформу. Для существующей production-базы, созданной ранее через `prisma db push`, перед первым `npm run db:migrate:deploy` нужно отметить начальную миграцию как применённую:
+
+```bash
+npx prisma migrate resolve --applied 20260510160000_init
+```
 
 ## Админ-заливка (Admin Upload)
 

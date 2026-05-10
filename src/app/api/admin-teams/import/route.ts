@@ -1,8 +1,12 @@
 import { NextResponse } from "next/server";
-import * as xlsx from "xlsx";
+import { readSheet } from "read-excel-file/node";
 import { prisma } from "@/lib/db";
 import { normalizeTeamName } from "@/lib/teams";
 import levenshtein from "fast-levenshtein";
+import { requireAdmin } from "@/lib/adminAuth";
+
+const MAX_IMPORT_BYTES = 10 * 1024 * 1024;
+const REMOTE_FETCH_TIMEOUT_MS = 15000;
 
 function findColumns(headers: string[]) {
   const normalizedHeaders = headers.map((h) => h.toLowerCase().trim());
@@ -105,6 +109,9 @@ async function runAutoMapping(disciplineSlug: string) {
 }
 
 export async function POST(request: Request) {
+  const unauthorized = await requireAdmin(request);
+  if (unauthorized) return unauthorized;
+
   try {
     const formData = await request.formData();
     const file = formData.get("file") as File;
@@ -119,39 +126,47 @@ export async function POST(request: Request) {
     let fileName: string;
 
     if (file) {
+      if (file.size > MAX_IMPORT_BYTES) {
+        return NextResponse.json({ error: "File is too large" }, { status: 413 });
+      }
+
       const bytes = await file.arrayBuffer();
       buffer = Buffer.from(bytes);
       fileName = file.name;
     } else {
-      let fetchUrl = url;
-      // Handle Google Sheets links
-      if (url.includes("docs.google.com/spreadsheets")) {
-        const match = url.match(/\/d\/(.+?)\//);
-        if (match) {
-          const id = match[1];
-          fetchUrl = `https://docs.google.com/spreadsheets/d/${id}/export?format=xlsx`;
-        }
+      const fetchUrl = toGoogleSheetsExportUrl(url);
+      if (!fetchUrl) {
+        return NextResponse.json({ error: "Only Google Sheets spreadsheet URLs are allowed" }, { status: 400 });
       }
-      
-      const response = await fetch(fetchUrl);
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), REMOTE_FETCH_TIMEOUT_MS);
+      const response = await fetch(fetchUrl, { signal: controller.signal }).finally(() => clearTimeout(timeout));
+
       if (!response.ok) {
         throw new Error(`Failed to fetch from URL: ${response.statusText}`);
       }
+
+      const contentLength = Number(response.headers.get("content-length"));
+      if (Number.isFinite(contentLength) && contentLength > MAX_IMPORT_BYTES) {
+        return NextResponse.json({ error: "Remote file is too large" }, { status: 413 });
+      }
+
       const bytes = await response.arrayBuffer();
+      if (bytes.byteLength > MAX_IMPORT_BYTES) {
+        return NextResponse.json({ error: "Remote file is too large" }, { status: 413 });
+      }
+
       buffer = Buffer.from(bytes);
       fileName = "remote_url";
     }
 
-    const workbook = xlsx.read(buffer, { type: "buffer" });
-    const firstSheetName = workbook.SheetNames[0];
-    const worksheet = workbook.Sheets[firstSheetName];
-
-    const data: any[][] = xlsx.utils.sheet_to_json(worksheet, { header: 1 });
+    const data = await readSheet(buffer);
     if (data.length < 2) {
       return NextResponse.json({ error: "Source has no data" }, { status: 400 });
     }
 
-    const headers = data[0].map(String);
+    const headers = data[0].map((cell) => String(cell ?? ""));
     const { idCol, nameCol } = findColumns(headers);
 
     if (idCol === -1 || nameCol === -1) {
@@ -208,5 +223,21 @@ export async function POST(request: Request) {
   } catch (error: any) {
     console.error("Import error:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+}
+
+function toGoogleSheetsExportUrl(rawUrl: string) {
+  try {
+    const parsed = new URL(rawUrl);
+    if (parsed.hostname !== "docs.google.com" || !parsed.pathname.includes("/spreadsheets/")) {
+      return null;
+    }
+
+    const match = parsed.pathname.match(/\/spreadsheets\/d\/([^/]+)/);
+    if (!match) return null;
+
+    return `https://docs.google.com/spreadsheets/d/${match[1]}/export?format=xlsx`;
+  } catch {
+    return null;
   }
 }

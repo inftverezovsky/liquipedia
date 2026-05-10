@@ -3,12 +3,13 @@ import { prisma } from '@/lib/db';
 
 export async function GET(
   request: Request,
-  { params }: { params: { disciplineSlug: string, id: string } }
+  { params }: { params: Promise<{ disciplineSlug: string; id: string }> }
 ) {
+  const { disciplineSlug, id } = await params;
   try {
     const logs = await prisma.adminUploadLog.findMany({
       where: {
-        tournamentId: params.id,
+        tournamentId: id,
         status: { in: ['success', 'success_like'] }
       },
       orderBy: { createdAt: 'desc' },

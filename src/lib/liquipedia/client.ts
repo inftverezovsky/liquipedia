@@ -1,5 +1,19 @@
-import { getLiquipediaDota2ApiUrl, getLiquipediaUserAgent } from "@/lib/env";
+import { getLiquipediaUserAgent } from "@/lib/env";
+import { prisma } from "@/lib/db";
 import { withGenericRateLimit, withParseRateLimit } from "@/lib/liquipedia/rateLimiter";
+import { HttpsProxyAgent } from "https-proxy-agent";
+import { SocksProxyAgent } from "socks-proxy-agent";
+import { markProxyFailure, markProxySuccess, maskProxyUrl, selectProxyCandidate } from "@/lib/proxySelector";
+import { classifyParserError, shouldCooldownProxyForError } from "@/lib/parserErrors";
+import crypto from "crypto";
+import fs from "fs";
+import nodeFetch from "node-fetch";
+import path from "path";
+
+const LIQUIPEDIA_API_TIMEOUT_MS = Number(process.env.LIQUIPEDIA_API_TIMEOUT_MS || 20000);
+const LIQUIPEDIA_API_MAX_RETRIES = Number(process.env.LIQUIPEDIA_API_MAX_RETRIES || 1);
+const LIQUIPEDIA_SEARCH_CANDIDATE_LIMIT = Number(process.env.LIQUIPEDIA_SEARCH_CANDIDATE_LIMIT || 20);
+const LIQUIPEDIA_SEARCH_METADATA_TTL_MS = Number(process.env.LIQUIPEDIA_SEARCH_METADATA_TTL_SECONDS || 24 * 60 * 60) * 1000;
 
 export type LiquipediaSearchResult = {
   pageId: number;
@@ -16,6 +30,15 @@ export type LiquipediaPageContent = {
   title: string;
   fullUrl: string;
   wikitext: string;
+  raw: unknown;
+};
+
+export type LiquipediaPageRevision = {
+  pageId?: number;
+  title: string;
+  fullUrl: string;
+  revisionId?: number | null;
+  revisionTimestamp?: Date | null;
   raw: unknown;
 };
 
@@ -45,6 +68,15 @@ type PageApiResponse = {
   };
 };
 
+type SearchPageMetadata = {
+  pageId: number;
+  title: string;
+  pageUrl: string;
+  isTournament: boolean;
+  dates: string | null;
+  fetchedAt: number;
+};
+
 export async function searchTournamentPages(query: string, apiUrl: string, disciplineSlug: string, limit = 10): Promise<LiquipediaSearchResult[]> {
   const currentYear = new Date().getFullYear();
   const variations = [query];
@@ -68,7 +100,7 @@ export async function searchTournamentPages(query: string, apiUrl: string, disci
         action: "opensearch",
         format: "json",
         search: v,
-        limit: "50"
+        limit: "20"
       });
       const openTitles = openResponse[1] ?? [];
       const openUrls = openResponse[3] ?? [];
@@ -82,7 +114,7 @@ export async function searchTournamentPages(query: string, apiUrl: string, disci
         action: "query",
         list: "search",
         srsearch: v,
-        srlimit: "50",
+        srlimit: "20",
         format: "json"
       });
       const searchTitles = searchResponse.query?.search?.map(s => s.title) ?? [];
@@ -92,17 +124,35 @@ export async function searchTournamentPages(query: string, apiUrl: string, disci
     }
   }));
 
-  const allTitles = Array.from(allTitlesSet);
+  const allTitles = Array.from(allTitlesSet).slice(0, LIQUIPEDIA_SEARCH_CANDIDATE_LIMIT);
   if (allTitles.length > 0) {
     try {
       // Process in chunks to avoid URL length limits
       const chunkSize = 40;
       const pages: any[] = [];
+      const titlesToFetch: string[] = [];
       const normalizedMap = new Map<string, string>();
       const redirectsMap = new Map<string, string>();
+      const activeResults = new Map<string, { title: string, pageId: number, pageUrl: string, dates: string | null }>();
 
-      for (let i = 0; i < allTitles.length; i += chunkSize) {
-        const chunk = allTitles.slice(i, i + chunkSize);
+      for (const title of allTitles) {
+        const metadata = getCachedSearchPageMetadata(disciplineSlug, title);
+        if (metadata) {
+          if (metadata.isTournament) {
+            activeResults.set(title, {
+              title: metadata.title,
+              pageId: metadata.pageId,
+              pageUrl: metadata.pageUrl,
+              dates: metadata.dates,
+            });
+          }
+        } else {
+          titlesToFetch.push(title);
+        }
+      }
+
+      for (let i = 0; i < titlesToFetch.length; i += chunkSize) {
+        const chunk = titlesToFetch.slice(i, i + chunkSize);
         const infoResponse = await apiRequest<PageApiResponse>(apiUrl, {
           action: "query",
           format: "json",
@@ -124,7 +174,6 @@ export async function searchTournamentPages(query: string, apiUrl: string, disci
       const now = Date.now();
       const pastLimit = now - 30 * 24 * 60 * 60 * 1000;
       const futureLimit = now + 30 * 24 * 60 * 60 * 1000;
-      const activeResults = new Map<string, { title: string, dates: string | null }>();
       
       // Clean wiki markup from date strings
       const cleanDate = (val: string) => {
@@ -145,7 +194,17 @@ export async function searchTournamentPages(query: string, apiUrl: string, disci
 
         // STRICT: Only show tournament pages (must have tournament/league infobox)
         const isTournament = /\{\{\s*(?:Infobox\s+league|Infobox\s+tournament|LeagueInfobox|TournamentInfobox)/i.test(wikitext);
-        if (!isTournament) continue;
+        if (!isTournament) {
+          setCachedSearchPageMetadata(disciplineSlug, p.title, {
+            pageId: p.pageid ?? 0,
+            title: p.title,
+            pageUrl: titleToUrl.get(p.title) ?? makeLiquipediaPageUrl(p.title, disciplineSlug),
+            isTournament: false,
+            dates: null,
+            fetchedAt: Date.now(),
+          });
+          continue;
+        }
 
         const enddateRaw = wikitext.match(/\|\s*(?:edate|enddate|end_date|date2|date_end)\s*=\s*([^|\n]*(?:\{\{[^}]*\}\}[^|\n]*)*)/i)?.[1]?.trim();
         const startdateRaw = wikitext.match(/\|\s*(?:sdate|startdate|start_date|date1|date_start)\s*=\s*([^|\n]*(?:\{\{[^}]*\}\}[^|\n]*)*)/i)?.[1]?.trim();
@@ -178,17 +237,33 @@ export async function searchTournamentPages(query: string, apiUrl: string, disci
           }
         }
 
-        // 4. Hide if no dates found at all
-        if (!startdateMatch && !enddateMatch) {
-          shouldHide = true;
-        }
+        // 4. Don't hide if no dates found, just let dates be null
+        // (Removed strict hiding to avoid "no results" when parsing fails)
 
         if (!shouldHide) {
           let datesStr = null;
           if (startdateMatch || enddateMatch) {
             datesStr = [startdateMatch, enddateMatch].filter(Boolean).join(" — ");
           }
-          activeResults.set(p.title, { title: p.title, dates: datesStr });
+          const pageUrl = titleToUrl.get(p.title) ?? makeLiquipediaPageUrl(p.title, disciplineSlug);
+          activeResults.set(p.title, { title: p.title, pageId: p.pageid ?? 0, pageUrl, dates: datesStr });
+          setCachedSearchPageMetadata(disciplineSlug, p.title, {
+            pageId: p.pageid ?? 0,
+            title: p.title,
+            pageUrl,
+            isTournament: true,
+            dates: datesStr,
+            fetchedAt: Date.now(),
+          });
+        } else {
+          setCachedSearchPageMetadata(disciplineSlug, p.title, {
+            pageId: p.pageid ?? 0,
+            title: p.title,
+            pageUrl: titleToUrl.get(p.title) ?? makeLiquipediaPageUrl(p.title, disciplineSlug),
+            isTournament: false,
+            dates: null,
+            fetchedAt: Date.now(),
+          });
         }
       }
 
@@ -216,9 +291,9 @@ export async function searchTournamentPages(query: string, apiUrl: string, disci
           if (yearRegex.test(title)) score += 1000;
 
           results.push({
-            pageId: 0,
+            pageId: activeInfo.pageId,
             title: title,
-            pageUrl: titleToUrl.get(title) ?? makeLiquipediaPageUrl(title, disciplineSlug),
+            pageUrl: titleToUrl.get(title) ?? activeInfo.pageUrl ?? makeLiquipediaPageUrl(title, disciplineSlug),
             snippet: "",
             score: score,
             wordCount: null,
@@ -230,13 +305,91 @@ export async function searchTournamentPages(query: string, apiUrl: string, disci
       // Final sort by score
       results.sort((a, b) => (b.score || 0) - (a.score || 0));
 
-      return results.slice(0, limit);
+      if (results.length > 0) {
+        return results.slice(0, limit);
+      }
+
+      // If strict current/upcoming filtering found nothing, still return tournament
+      // pages so exact searches and older imports remain usable.
+      const fallbackResults = pages
+        .filter((p) => {
+          const wikitext = p.revisions?.[0]?.slots?.main?.content;
+          return wikitext && /\{\{\s*(?:Infobox\s+league|Infobox\s+tournament|LeagueInfobox|TournamentInfobox)/i.test(wikitext);
+        })
+        .slice(0, limit)
+        .map((p, index) => ({
+          pageId: p.pageid ?? 0,
+          title: p.title,
+          pageUrl: titleToUrl.get(p.title) ?? makeLiquipediaPageUrl(p.title, disciplineSlug),
+          snippet: "",
+          score: allTitles.length - index,
+          wordCount: null,
+          dates: null,
+        }));
+
+      return fallbackResults;
     } catch (err) {
       console.error("Failed to filter search results:", err);
     }
   }
 
   return [];
+}
+
+function getCachedSearchPageMetadata(disciplineSlug: string, title: string): SearchPageMetadata | null {
+  try {
+    const cachePath = getSearchPageMetadataPath(disciplineSlug, title);
+    if (!fs.existsSync(cachePath)) return null;
+
+    const metadata = JSON.parse(fs.readFileSync(cachePath, "utf8")) as SearchPageMetadata;
+    if (!metadata?.fetchedAt || Date.now() - metadata.fetchedAt > LIQUIPEDIA_SEARCH_METADATA_TTL_MS) {
+      return null;
+    }
+
+    return metadata;
+  } catch {
+    return null;
+  }
+}
+
+function setCachedSearchPageMetadata(disciplineSlug: string, title: string, metadata: SearchPageMetadata) {
+  try {
+    const cachePath = getSearchPageMetadataPath(disciplineSlug, title);
+    fs.mkdirSync(path.dirname(cachePath), { recursive: true });
+    fs.writeFileSync(cachePath, JSON.stringify(metadata));
+  } catch {}
+}
+
+function getSearchPageMetadataPath(disciplineSlug: string, title: string) {
+  const key = crypto.createHash("sha1").update(`${disciplineSlug}:${title}`).digest("hex");
+  return path.join(process.cwd(), "cache", "liquipedia", "page-meta", `${key}.json`);
+}
+
+function hashQuery(value: string) {
+  return crypto.createHash("sha1").update(value).digest("hex");
+}
+
+async function logLiquipediaRequest(data: {
+  mode: string;
+  proxyId?: string | null;
+  statusCode?: number;
+  errorClass?: string;
+  durationMs?: number;
+  bytesIn?: number;
+  queryHash?: string;
+}) {
+  await prisma.parserRequestLog.create({
+    data: {
+      source: "liquipedia",
+      mode: data.mode,
+      proxyId: data.proxyId || null,
+      statusCode: data.statusCode,
+      errorClass: data.errorClass,
+      durationMs: data.durationMs,
+      bytesIn: data.bytesIn,
+      queryHash: data.queryHash,
+    },
+  }).catch(() => {});
 }
 
 export async function fetchPagesWikitext(apiUrl: string, disciplineSlug: string, titles: string[]): Promise<LiquipediaPageContent[]> {
@@ -315,6 +468,42 @@ export async function fetchPageWikitext(apiUrl: string, disciplineSlug: string, 
   throw new Error("Liquipedia page not found");
 }
 
+export async function fetchPageRevision(apiUrl: string, disciplineSlug: string, input: { pageId?: number; title?: string }): Promise<LiquipediaPageRevision> {
+  const params: Record<string, string> = {
+    action: "query",
+    format: "json",
+    formatversion: "2",
+    prop: "info|revisions",
+    inprop: "url",
+    rvprop: "timestamp|ids",
+    redirects: "1",
+  };
+
+  if (input.pageId) {
+    params.pageids = String(input.pageId);
+  } else if (input.title) {
+    params.titles = input.title;
+  } else {
+    throw new Error("Liquipedia page not found");
+  }
+
+  const response = await apiRequest<PageApiResponse>(apiUrl, params);
+  const page = response.query?.pages?.[0];
+  if (!page || page.missing) throw new Error("Liquipedia page not found");
+
+  const revision = page.revisions?.[0];
+  const revisionTimestamp = revision?.timestamp ? new Date(revision.timestamp) : null;
+
+  return {
+    pageId: page.pageid,
+    title: page.title,
+    fullUrl: page.fullurl ?? makeLiquipediaPageUrl(page.title, disciplineSlug),
+    revisionId: typeof revision?.revid === "number" ? revision.revid : null,
+    revisionTimestamp: revisionTimestamp && Number.isFinite(revisionTimestamp.getTime()) ? revisionTimestamp : null,
+    raw: response,
+  };
+}
+
 export function makeLiquipediaPageUrl(title: string, disciplineSlug: string) {
   const normalized = title.trim().replace(/ /g, "_");
   return `https://liquipedia.net/${disciplineSlug}/${encodeURIComponent(normalized).replace(/%2F/g, "/")}`;
@@ -337,45 +526,57 @@ export async function fetchPageParsed(apiUrl: string, title: string): Promise<st
   return response.parse?.text?.["*"] ?? "";
 }
 
-import { HttpsProxyAgent } from "https-proxy-agent";
-import { SocksProxyAgent } from "socks-proxy-agent";
-import { prisma } from "@/lib/db";
-import nodeFetch from "node-fetch";
-
 export async function fetchHtml(url: string): Promise<string> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), LIQUIPEDIA_API_TIMEOUT_MS);
   const fetchOptions: any = {
     method: "GET",
     headers: {
       "User-Agent": getLiquipediaUserAgent(),
       "Accept-Encoding": "gzip",
       Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8"
-    }
+    },
+    signal: controller.signal
   };
 
-  const settings = await prisma.globalSettings.findMany({
-    where: { key: { in: ['proxy_host', 'proxy_port', 'proxy_username', 'proxy_password'] } }
-  });
-  const config = settings.reduce((acc, s) => ({ ...acc, [s.key]: s.value }), {} as Record<string, string>);
-  
-  if (config.proxy_host && config.proxy_port) {
-    const isSocks = config.proxy_host.startsWith('socks') || config.proxy_port === '10800'; 
-    let protocol = isSocks ? 'socks5' : 'http';
-    let proxyStr = `${protocol}://`;
-    if (config.proxy_username && config.proxy_password) {
-      proxyStr += `${config.proxy_username}:${config.proxy_password}@`;
-    }
-    proxyStr += `${config.proxy_host.replace(/^(socks5:\/\/|http:\/\/)/, '')}:${config.proxy_port}`;
-    fetchOptions.agent = isSocks ? new SocksProxyAgent(proxyStr) : new HttpsProxyAgent(proxyStr);
+  const proxy = await selectProxyCandidate();
+  const startedAt = Date.now();
+  if (proxy?.proxyUrl) {
+    fetchOptions.agent = proxy.proxyUrl.startsWith('socks') ? new SocksProxyAgent(proxy.proxyUrl) : new HttpsProxyAgent(proxy.proxyUrl);
   }
 
-  const response = await nodeFetch(url, fetchOptions as any);
+  const response = await nodeFetch(url, fetchOptions as any)
+    .catch(async (error) => {
+      const errorClass = classifyParserError({ message: error instanceof Error ? error.message : String(error) });
+      await markProxyFailure(proxy?.proxyId || null, {
+        errorClass,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        durationMs: Date.now() - startedAt,
+      });
+      throw error;
+    })
+    .finally(() => clearTimeout(timeoutId));
   if (!response.ok) {
+    const errorClass = classifyParserError({ statusCode: response.status, message: `Failed to fetch HTML ${response.status}` });
+    if (shouldCooldownProxyForError(errorClass)) {
+      await markProxyFailure(proxy?.proxyId || null, {
+        errorClass,
+        errorMessage: `Failed to fetch HTML ${response.status} from ${url}`,
+        durationMs: Date.now() - startedAt,
+        blocked: errorClass === "cloudflare_block",
+      });
+    }
+    if (response.status === 403 || response.status === 424) {
+      const htmlFromApi = await fetchHtmlViaMediaWikiApi(url).catch(() => "");
+      if (htmlFromApi) return htmlFromApi;
+    }
     throw new Error(`Failed to fetch HTML ${response.status} from ${url}`);
   }
+  await markProxySuccess(proxy?.proxyId || null, Date.now() - startedAt);
   return response.text();
 }
 
-export async function apiRequest<T>(apiUrl: string, params: Record<string, string>, isParse = false): Promise<T> {
+export async function apiRequest<T>(apiUrl: string, params: Record<string, string>, isParse = false, retryCount = 0): Promise<T> {
   const execute = async () => {
     const url = new URL(apiUrl);
     for (const [key, value] of Object.entries(params)) {
@@ -385,73 +586,192 @@ export async function apiRequest<T>(apiUrl: string, params: Record<string, strin
     console.log(`[Liquipedia API Request] URL: ${url.toString()}`);
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 45000);
+    const timeoutId = setTimeout(() => controller.abort(), LIQUIPEDIA_API_TIMEOUT_MS);
 
-    const userAgent = getLiquipediaUserAgent();
-    const finalUserAgent = userAgent.includes("change-me") 
-      ? "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 (TCyber/1.0)"
-      : userAgent;
+    const finalUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
     const fetchOptions: any = {
       method: "GET",
       headers: {
         "User-Agent": finalUserAgent,
-        "Accept-Encoding": "gzip",
-        Accept: "application/json"
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "Accept-Language": "en-US,en;q=0.9,ru;q=0.8",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Cache-Control": "max-age=0",
+        "Sec-Ch-Ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+        "Sec-Ch-Ua-Mobile": "?0",
+        "Sec-Ch-Ua-Platform": '"Windows"',
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+        "Sec-Fetch-User": "?1",
+        "Upgrade-Insecure-Requests": "1"
       },
       signal: controller.signal
     };
 
-    // Load proxy settings
-    const settings = await prisma.globalSettings.findMany({
-      where: { key: { in: ['proxy_host', 'proxy_port', 'proxy_username', 'proxy_password'] } }
-    });
-    const config = settings.reduce((acc, s) => ({ ...acc, [s.key]: s.value }), {} as Record<string, string>);
-    
-    if (config.proxy_host && config.proxy_port) {
-      const isSocks = config.proxy_host.startsWith('socks') || config.proxy_port === '10800'; 
-      let protocol = isSocks ? 'socks5' : 'http';
-      
-      let proxyStr = `${protocol}://`;
-      if (config.proxy_username && config.proxy_password) {
-        proxyStr += `${config.proxy_username}:${config.proxy_password}@`;
-      }
-      proxyStr += `${config.proxy_host.replace(/^(socks5:\/\/|http:\/\/)/, '')}:${config.proxy_port}`;
-      
-      try {
-        fetchOptions.agent = isSocks ? new SocksProxyAgent(proxyStr) : new HttpsProxyAgent(proxyStr);
-        console.log(`[Liquipedia API] Using ${protocol.toUpperCase()} Proxy: ${config.proxy_host}:${config.proxy_port}`);
-      } catch (proxyErr) {
-        console.error(`[Liquipedia API] Proxy Agent Init Error:`, proxyErr);
-      }
+    const proxy = await selectProxyCandidate(retryCount + 1);
+    if (!proxy?.proxyUrl) {
+      throw new Error("Прокси не настроены. Пожалуйста, добавьте прокси в Proxy Pool.");
     }
 
-    const response = await nodeFetch(url.toString(), fetchOptions as any).finally(() => clearTimeout(timeoutId));
+    fetchOptions.agent = proxy.proxyUrl.startsWith('socks') ? new SocksProxyAgent(proxy.proxyUrl) : new HttpsProxyAgent(proxy.proxyUrl);
+    console.log(`[Liquipedia API] Using Proxy from Pool: ${maskProxyUrl(proxy.proxyUrl)}`);
+
+    let response;
+    const startedAt = Date.now();
+    try {
+      response = await nodeFetch(url.toString(), fetchOptions as any).finally(() => clearTimeout(timeoutId));
+    } catch (e: any) {
+      const durationMs = Date.now() - startedAt;
+      const errorClass = classifyParserError({ message: e.message });
+      await markProxyFailure(proxy.proxyId, {
+        errorClass,
+        errorMessage: e.message,
+        durationMs,
+      });
+      await logLiquipediaRequest({
+        mode: isParse ? "parse" : "api",
+        proxyId: proxy.proxyId,
+        errorClass,
+        durationMs,
+        queryHash: hashQuery(url.toString()),
+      });
+      if (retryCount < LIQUIPEDIA_API_MAX_RETRIES) {
+        console.log(`[Liquipedia API] Network error, rotating proxy and retrying (Attempt ${retryCount + 1})...`);
+        return apiRequest<T>(apiUrl, params, isParse, retryCount + 1);
+      }
+      throw e;
+    }
+
+    if (response.status === 424 || response.status === 403) {
+      const durationMs = Date.now() - startedAt;
+      const errorClass = classifyParserError({ statusCode: response.status, message: `Liquipedia blocked with ${response.status}` });
+      await markProxyFailure(proxy.proxyId, {
+        errorClass,
+        errorMessage: `Liquipedia blocked with ${response.status}`,
+        durationMs,
+        blocked: true,
+      });
+      await logLiquipediaRequest({
+        mode: isParse ? "parse" : "api",
+        proxyId: proxy.proxyId,
+        statusCode: response.status,
+        errorClass,
+        durationMs,
+        queryHash: hashQuery(url.toString()),
+      });
+      if (retryCount < LIQUIPEDIA_API_MAX_RETRIES) {
+        console.log(`[Liquipedia API] Blocked (${response.status}), rotating proxy and retrying (Attempt ${retryCount + 1})...`);
+        return apiRequest<T>(apiUrl, params, isParse, retryCount + 1);
+      }
+    }
 
     const contentType = response.headers.get("content-type") || "";
     console.log(`[Liquipedia API Response] Status: ${response.status}, Content-Type: ${contentType}`);
 
     if (!response.ok) {
       const text = await response.text();
+      const errorClass = classifyParserError({ statusCode: response.status, message: text });
       console.log(`[Liquipedia API Error Body] ${text.slice(0, 500)}`);
+      if (shouldCooldownProxyForError(errorClass)) {
+        await markProxyFailure(proxy.proxyId, {
+          errorClass,
+          errorMessage: `Liquipedia API error ${response.status}: ${text.slice(0, 300)}`,
+          durationMs: Date.now() - startedAt,
+          blocked: errorClass === "cloudflare_block",
+        });
+      }
+      await logLiquipediaRequest({
+        mode: isParse ? "parse" : "api",
+        proxyId: proxy.proxyId,
+        statusCode: response.status,
+        errorClass,
+        durationMs: Date.now() - startedAt,
+        bytesIn: text.length,
+        queryHash: hashQuery(url.toString()),
+      });
       throw new Error(`Liquipedia API error ${response.status}: ${text.slice(0, 300)}`);
     }
 
     if (!contentType.includes("application/json") && !contentType.includes("application/mediawiki+json")) {
       const text = await response.text();
+      const errorClass = classifyParserError({
+        statusCode: response.status,
+        message: `non-json response ${text.slice(0, 500)}`,
+      });
       console.log(`[Liquipedia API Non-JSON Body] ${text.slice(0, 500)}`);
+      if (shouldCooldownProxyForError(errorClass)) {
+        await markProxyFailure(proxy.proxyId, {
+          errorClass,
+          errorMessage: `Liquipedia API non-JSON response ${response.status}`,
+          durationMs: Date.now() - startedAt,
+          blocked: errorClass === "cloudflare_block",
+        });
+      }
+      await logLiquipediaRequest({
+        mode: isParse ? "parse" : "api",
+        proxyId: proxy.proxyId,
+        statusCode: response.status,
+        errorClass,
+        durationMs: Date.now() - startedAt,
+        bytesIn: text.length,
+        queryHash: hashQuery(url.toString()),
+      });
       throw new Error(`Liquipedia API returned non-JSON response. This usually means the request was blocked by Cloudflare or Liquipedia. (Status: ${response.status})`);
     }
 
     const text = await response.text();
     try {
-      return JSON.parse(text) as T;
+      const parsed = JSON.parse(text) as T;
+      await markProxySuccess(proxy.proxyId, Date.now() - startedAt);
+      await logLiquipediaRequest({
+        mode: isParse ? "parse" : "api",
+        proxyId: proxy.proxyId,
+        statusCode: response.status,
+        durationMs: Date.now() - startedAt,
+        bytesIn: text.length,
+        queryHash: hashQuery(url.toString()),
+      });
+      return parsed;
     } catch {
+      await logLiquipediaRequest({
+        mode: isParse ? "parse" : "api",
+        proxyId: proxy.proxyId,
+        statusCode: response.status,
+        errorClass: "parse_failed",
+        durationMs: Date.now() - startedAt,
+        bytesIn: text.length,
+        queryHash: hashQuery(url.toString()),
+      });
       throw new Error(`Liquipedia API returned invalid JSON. Body length: ${text.length}`);
     }
   };
 
   return isParse ? withParseRateLimit(execute) : withGenericRateLimit(execute);
+}
+
+async function fetchHtmlViaMediaWikiApi(pageUrl: string) {
+  const url = new URL(pageUrl);
+  const [, slug, ...titleParts] = url.pathname.split("/");
+  const title = decodeURIComponent(titleParts.join("/")).replace(/_/g, " ");
+  if (!slug || !title) return "";
+
+  const apiUrl = `${url.origin}/${slug}/api.php`;
+  const response = await apiRequest<{ parse?: { text?: { "*"?: string } } }>(
+    apiUrl,
+    {
+      action: "parse",
+      format: "json",
+      page: title,
+      prop: "text",
+      disabletoc: "1",
+      redirects: "1"
+    },
+    true
+  );
+
+  return response.parse?.text?.["*"] ?? "";
 }
 
 function stripHtml(value: string) {

@@ -252,6 +252,33 @@ function extractMatchesFromParsedHtml(html: string, pageUrl: string): Normalized
     return "";
   }
 
+  function findPreviousHeadingForElement(el: any, selector: string): string {
+    let current = $(el);
+
+    for (let depth = 0; depth < 10; depth++) {
+      const heading = current.prevAll(selector).first();
+      if (heading.length > 0) {
+        return heading.text().replace(/\[edit\]/g, "").trim();
+      }
+
+      const parent = current.parent();
+      if (parent.length === 0) break;
+      current = parent;
+    }
+
+    return "";
+  }
+
+  function parseScoreText(text: string): [number, number] | null {
+    const match = text.replace(/\s+/g, " ").trim().match(/(\d+)\s*[-:]\s*(\d+)/);
+    if (!match) return null;
+    return [Number(match[1]), Number(match[2])];
+  }
+
+  function isNonTeamTitle(value: string) {
+    return /^(time|date)$/i.test(value) || value.includes("(page does not exist)");
+  }
+
   function getFullTeamName(oppEl: any): string | null {
     const $opp = $(oppEl);
     const aria = $opp.attr("aria-label")?.trim();
@@ -259,9 +286,9 @@ function extractMatchesFromParsedHtml(html: string, pageUrl: string): Normalized
     const parentAria = $opp.closest("[aria-label]").attr("aria-label")?.trim();
     if (parentAria && parentAria !== "TBD") return parentAria;
     const linkTitle = $opp.find(".name a").attr("title")?.trim();
-    if (linkTitle && !linkTitle.includes("Time") && !linkTitle.includes("(page does not exist)")) return linkTitle;
+    if (linkTitle && !isNonTeamTitle(linkTitle)) return linkTitle;
     const teamLink = $opp.find("a[href*='/leagueoflegends/']").attr("title")?.trim();
-    if (teamLink && !teamLink.includes("Time") && !teamLink.includes("(page does not exist)")) return teamLink;
+    if (teamLink && !isNonTeamTitle(teamLink)) return teamLink;
     const nameText = $opp.find(".name").text().trim();
     if (nameText) return nameText;
     return "TBD";
@@ -325,7 +352,52 @@ function extractMatchesFromParsedHtml(html: string, pageUrl: string): Normalized
     if (matches.length >= 500) return false;
   });
 
-  // 2. Extract from bracket matches
+  // 2. Extract generated round-robin pairings from Liquipedia crosstables.
+  $("table.crosstable").each((_, tableEl) => {
+    const $table = $(tableEl);
+    const groupName = findPreviousHeadingForElement(tableEl, ".mw-heading3, h3");
+    const stageName = findPreviousHeadingForElement(tableEl, ".mw-heading2, h2") || "Group Stage";
+    const rows = $table.find("tr.crosstable-tr").map((__, rowEl) => {
+      const $row = $(rowEl);
+      const cells = $row.children("td");
+      if (cells.length < 2) return null;
+
+      const teamName = getFullTeamName($row.children("th").first());
+      if (!teamName || isPlaceholderTeam(teamName)) return null;
+
+      return {
+        teamName,
+        cells,
+        raw: $.html(rowEl)?.slice(0, 2500) || null
+      };
+    }).get().filter((row): row is { teamName: string; cells: any; raw: string | null } => !!row);
+
+    for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+      for (let colIndex = rowIndex + 1; colIndex < rows.length; colIndex++) {
+        const cell = rows[rowIndex].cells.eq(colIndex);
+        if (!cell.length || cell.hasClass("crosstable-bgc-cross")) continue;
+
+        const score = parseScoreText(cell.text());
+        matches.push({
+          stage: stageName,
+          round: groupName || null,
+          matchDate: null,
+          matchDateTime: null,
+          teamAName: rows[rowIndex].teamName,
+          teamBName: rows[colIndex].teamName,
+          scoreA: score?.[0] ?? null,
+          scoreB: score?.[1] ?? null,
+          format: "Round robin",
+          status: score ? "finished" : "upcoming",
+          court: null,
+          sourceUrl: pageUrl,
+          rawText: [rows[rowIndex].raw, $.html(cell)?.slice(0, 1000), rows[colIndex].raw].filter(Boolean).join("\n")
+        });
+      }
+    }
+  });
+
+  // 3. Extract from bracket matches
   $(".brkts-match").each((_, matchEl) => {
     const $match = $(matchEl);
     const opponents = $match.find(".brkts-opponent-entry");
@@ -577,21 +649,10 @@ function dedupeMatches(matches: NormalizedMatch[]): NormalizedMatch[] {
       continue;
     }
 
-    const pairKey = [
-      match.teamAName?.toLowerCase(),
-      match.teamBName?.toLowerCase(),
-      match.matchDate?.toISOString().slice(0, 10),
-      match.stage
-    ].join("|");
+    const pairKey = matchDedupeKey(match);
 
     const existingByPair = [...seen.values()].find((m) => {
-      const k = [
-        m.teamAName?.toLowerCase(),
-        m.teamBName?.toLowerCase(),
-        m.matchDate?.toISOString().slice(0, 10),
-        m.stage
-      ].join("|");
-      return k === pairKey;
+      return matchDedupeKey(m) === pairKey;
     });
 
     if (existingByPair) {
@@ -635,6 +696,22 @@ function createStableMatchId(input: {
   ].join("|");
   const hash = createHash("md5").update(data).digest("hex").slice(0, 12);
   return `match_${hash}`;
+}
+
+function matchDedupeKey(match: NormalizedMatch) {
+  const teams = [
+    (match.teamAName || "").toLowerCase().trim(),
+    (match.teamBName || "").toLowerCase().trim()
+  ].sort();
+  return [
+    teams[0],
+    teams[1],
+    match.matchDate?.getTime() ?? "",
+    (match.matchDateTime || "").toLowerCase().trim(),
+    (match.stage || "").toLowerCase().trim(),
+    (match.round || "").toLowerCase().trim(),
+    (match.format || "").toLowerCase().trim()
+  ].join("|");
 }
 
 /* ───── Participants ───── */

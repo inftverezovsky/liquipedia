@@ -2,17 +2,24 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getAdminAuthConfigStatus } from '@/lib/adminUpload/adminHttpClient';
 import { resolveAdminSettings } from '@/lib/adminUpload/resolveAdminSettings';
+import { requireAdmin } from '@/lib/adminAuth';
+
+export const dynamic = "force-dynamic";
 
 export async function GET(
   request: Request,
-  { params }: { params: { disciplineSlug: string } }
+  { params }: { params: Promise<{ disciplineSlug: string }> }
 ) {
+  const { disciplineSlug } = await params;
+  const unauthorized = await requireAdmin(request);
+  if (unauthorized) return unauthorized;
+
   try {
-    const settings = await resolveAdminSettings(params.disciplineSlug);
+    const settings = await resolveAdminSettings(disciplineSlug);
     const authStatus = getAdminAuthConfigStatus();
 
     const merged = {
-      disciplineSlug: params.disciplineSlug,
+      disciplineSlug: disciplineSlug,
       ...settings,
       authStatus,
     };
@@ -25,8 +32,12 @@ export async function GET(
 
 export async function POST(
   request: Request,
-  { params }: { params: { disciplineSlug: string } }
+  { params }: { params: Promise<{ disciplineSlug: string }> }
 ) {
+  const { disciplineSlug } = await params;
+  const unauthorized = await requireAdmin(request);
+  if (unauthorized) return unauthorized;
+
   try {
     const body = await request.json();
     const {
@@ -41,7 +52,7 @@ export async function POST(
     } = body;
 
     const settings = await prisma.disciplineAdminSettings.upsert({
-      where: { disciplineSlug: params.disciplineSlug },
+      where: { disciplineSlug: disciplineSlug },
       update: {
         apiUrl,
         adminSportId: adminSportId?.toString(),
@@ -53,7 +64,7 @@ export async function POST(
         sslVerify,
       },
       create: {
-        disciplineSlug: params.disciplineSlug,
+        disciplineSlug: disciplineSlug,
         apiUrl,
         adminSportId: adminSportId?.toString(),
         adminMax: adminMax?.toString(),

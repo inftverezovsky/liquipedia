@@ -5,9 +5,9 @@ export const dynamic = "force-dynamic";
 
 export async function GET(
   request: Request,
-  { params }: { params: { disciplineSlug: string; id: string } }
+  { params }: { params: Promise<{ disciplineSlug: string; id: string }> }
 ) {
-  const { disciplineSlug, id } = params;
+  const { disciplineSlug, id } = await params;
   const { searchParams } = new URL(request.url);
   const idsParam = searchParams.get("ids");
   const selectedIds = idsParam ? idsParam.split(",") : undefined;
@@ -17,16 +17,25 @@ export async function GET(
   });
 
   if (!tournament) {
-    return new Response("Tournament not found", { status: 404 });
+    return Response.json(
+      { error: "Tournament not found" },
+      {
+        status: 404,
+        headers: { "Cache-Control": "no-store, max-age=0" },
+      }
+    );
   }
 
   const buildResult = await buildFixtPayload(id, disciplineSlug, selectedIds);
   
   if (!buildResult.payload) {
-    const errorMsg = "Данные не готовы.\n\n" + buildResult.warnings.join("\n");
-    return new Response(errorMsg, { 
+    return Response.json({
+      error: "Данные не готовы",
+      warnings: buildResult.warnings,
+      skippedMatches: buildResult.skippedMatches,
+    }, {
       status: 400,
-      headers: { 'Content-Type': 'text/plain; charset=utf-8' }
+      headers: { "Cache-Control": "no-store, max-age=0" },
     });
   }
 
@@ -34,8 +43,9 @@ export async function GET(
 
   return new Response(jsonString, {
     headers: { 
-      'Content-Type': 'text/plain; charset=utf-8',
-      'Cache-Control': 'no-store, max-age=0'
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'no-store, max-age=0',
+      'Content-Disposition': `inline; filename="${id}.json"`,
     }
   });
 }

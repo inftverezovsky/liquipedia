@@ -4,8 +4,13 @@ import { getOrCreateCounterStrikeDiscipline } from "@/lib/disciplines";
 import { makeLiquipediaPageUrl } from "@/lib/liquipedia/client";
 import { normalizeCounterStrikeTournament } from "@/lib/normalizers/counterstrikeTournament";
 import { importTournamentRecursive } from "@/lib/liquipedia/importer";
+import { runHltvScript } from "@/lib/hltv/scraper";
+import { classifyParserError } from "@/lib/parserErrors";
+import { dedupeTournamentMatches } from "@/lib/matches/dedupe";
+import { getTeamMappingLookupKeys } from "@/lib/teams/canonicalize";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 300; // 5 minutes for long scraping with retries
 
 type Body = {
   pageId?: unknown;
@@ -32,6 +37,8 @@ export async function POST(request: Request) {
 
   // If source is HLTV, we handle it differently (skip Liquipedia recursive import)
   if (source === "hltv") {
+    let hltvData: { ok?: boolean; error?: string; errorClass?: string; matches?: any[] } = { ok: false };
+
     // 1. Create/Update tournament
     const tournament = await prisma.tournament.upsert({
       where: { disciplineSlug_sourceTitle: { disciplineSlug: "counterstrike", sourceTitle: title } },
@@ -64,52 +71,29 @@ export async function POST(request: Request) {
     }
 
     if (hltvEventId) {
-      // Get proxy config
-      const settings = await prisma.globalSettings.findMany({
-        where: { key: { in: ['proxy_host', 'proxy_port', 'proxy_username', 'proxy_password'] } }
-      });
-      const config = settings.reduce((acc, s) => ({ ...acc, [s.key]: s.value }), {} as Record<string, string>);
-      let proxyArg = "";
-      if (config.proxy_host && config.proxy_port) {
-        const isSocks = config.proxy_host.startsWith('socks') || config.proxy_port === '10800';
-        let proxyStr = `${isSocks ? 'socks5' : 'http'}://`;
-        if (config.proxy_username && config.proxy_password) proxyStr += `${config.proxy_username}:${config.proxy_password}@`;
-        proxyStr += `${config.proxy_host.replace(/^(socks5:\/\/|http:\/\/)/, '')}:${config.proxy_port}`;
-        proxyArg = `--proxy "${proxyStr}"`;
-      }
-
-      const command = `node scripts/hltv_playwright.mjs ${proxyArg} --mode event --id ${hltvEventId}`;
-      console.log(`[HLTV Import] Fetching matches for event ${hltvEventId}: ${command}`);
-
-      const { exec } = require('child_process');
-      const hltvData: any = await new Promise((resolve) => {
-        exec(command, { timeout: 120000 }, (err: any, stdout: string) => {
-          if (err) {
-            console.error(`[HLTV Import] Script error:`, err);
-            return resolve({ ok: false, error: err.message });
-          }
-          try {
-            const lines = stdout.trim().split('\n');
-            const lastLine = lines[lines.length - 1];
-            resolve(JSON.parse(lastLine));
-          } catch (e) { 
-            console.error(`[HLTV Import] JSON parse error. Raw output:`, stdout.slice(-200));
-            resolve({ ok: false, error: "Failed to parse script output" }); 
-          }
-        });
-      });
+      hltvData = await runHltvScript('event', hltvEventId, { noCache: !!body.force }).catch((err: unknown) => ({
+        ok: false,
+        error: err instanceof Error ? err.message : "Unknown HLTV scraper error",
+        errorClass: classifyParserError({ message: err instanceof Error ? err.message : String(err) }),
+      }));
 
       if (hltvData.ok && hltvData.matches) {
-        const uniqueTeams = new Set<string>();
-        for (const m of hltvData.matches) {
-          if (m.team1) uniqueTeams.add(m.team1);
-          if (m.team2) uniqueTeams.add(m.team2);
-
-          const matchDate = m.unix_time ? new Date(m.unix_time * 1000) : null;
-          await prisma.tournamentMatch.upsert({
-            where: { matchId: `hltv-${m.id}` },
+        // EXPERT OPTIMIZATION: Batch process all matches and participants to prevent DB connection drops
+        const hltvMatches = dedupeTournamentMatches(hltvData.matches.map((m: any) => ({
+          ...m,
+          matchId: `hltv-${m.id}`,
+          teamAName: m.team1,
+          teamBName: m.team2,
+          matchDate: m.unix_time ? new Date(m.unix_time * 1000) : null,
+        })));
+        
+        // 1. Batch Match Upserts using transaction
+        const matchUpserts = hltvMatches.map((m: any) => {
+          const matchDate = m.matchDate ? new Date(m.matchDate) : null;
+          return prisma.tournamentMatch.upsert({
+            where: { matchId: m.matchId },
             create: {
-              matchId: `hltv-${m.id}`,
+              matchId: m.matchId,
               tournamentId: tournament.id,
               teamAName: m.team1,
               teamBName: m.team2,
@@ -120,37 +104,73 @@ export async function POST(request: Request) {
             update: {
               teamAName: m.team1,
               teamBName: m.team2,
-              matchDate,
-              updatedAt: new Date()
+              matchDate
             }
           });
+        });
+
+        // 2. Prepare unique participants
+        const uniqueTeams = new Set<string>();
+        for (const m of hltvMatches) {
+          if (m.team1 && m.team1 !== 'TBD') uniqueTeams.add(m.team1);
+          if (m.team2 && m.team2 !== 'TBD') uniqueTeams.add(m.team2);
         }
 
-        // Add participants for mapping - ROBUST VERSION
-        const existingParticipants = await prisma.tournamentParticipant.findMany({
-          where: { tournamentId: tournament.id },
-          select: { name: true }
-        });
-        const existingNames = new Set(existingParticipants.map(p => p.name));
-
-        for (const teamName of Array.from(uniqueTeams)) {
-          if (!existingNames.has(teamName)) {
-            try {
-              await prisma.tournamentParticipant.create({
-                data: {
-                  tournamentId: tournament.id,
-                  name: teamName
-                }
-              });
-              existingNames.add(teamName);
-            } catch (e) {
-              console.log(`[HLTV Import] Participant ${teamName} already exists or error:`, e);
+        const [existingParticipants, teamMappings] = await Promise.all([
+          prisma.tournamentParticipant.findMany({
+            where: { tournamentId: tournament.id },
+            select: { name: true, platformId: true, logoUrl: true, rawText: true }
+          }),
+          prisma.teamMapping.findMany({
+            where: { disciplineSlug: "counterstrike" }
+          })
+        ]);
+        const existingParticipantMap = new Map(existingParticipants.map((p) => [p.name.toLowerCase(), p]));
+        const mappingLookup = new Map<string, (typeof teamMappings)[number]>();
+        for (const mapping of teamMappings) {
+          mappingLookup.set(mapping.liquipediaName.toLowerCase(), mapping);
+        }
+        for (const mapping of teamMappings) {
+          for (const key of getTeamMappingLookupKeys(mapping)) {
+            if (key && !mappingLookup.has(key.toLowerCase())) {
+              mappingLookup.set(key.toLowerCase(), mapping);
             }
           }
+        }
+
+        const participantsToInsert = Array.from(uniqueTeams)
+          .sort((a, b) => a.localeCompare(b))
+          .map(name => {
+            const existing = existingParticipantMap.get(name.toLowerCase());
+            const mapping = mappingLookup.get(name.toLowerCase());
+            return {
+            tournamentId: tournament.id,
+            name,
+            platformId: existing?.platformId || mapping?.platformId || null,
+            logoUrl: existing?.logoUrl || mapping?.logoUrl || null,
+            rawText: existing?.rawText || null,
+          };
+        });
+
+        // Replace HLTV participants with the latest event teams. Old bad OCR aliases
+        // like "G" for "G2" must not remain forever in the mapping UI.
+        try {
+          await prisma.$transaction([
+            ...matchUpserts,
+            prisma.tournamentParticipant.deleteMany({ where: { tournamentId: tournament.id } }),
+            ...(participantsToInsert.length > 0
+              ? [prisma.tournamentParticipant.createMany({ data: participantsToInsert })]
+              : [])
+          ]);
+        } catch (e) {
+          console.error(`[HLTV Import] Database batch save error:`, e);
+          throw new Error("Ошибка при сохранении матчей в базу данных.");
         }
       } else if (hltvData.error) {
         console.error(`[HLTV Import] Fetching failed: ${hltvData.error}`);
       }
+    } else {
+      hltvData = { ok: false, error: "Не удалось определить HLTV event id из URL" };
     }
 
     const fullTournament = await prisma.tournament.findUnique({
@@ -158,8 +178,8 @@ export async function POST(request: Request) {
       include: { participants: true, matches: true, lastImport: true }
     });
 
-    return NextResponse.json({ 
-      tournament: fullTournament, 
+    return NextResponse.json({
+      tournament: fullTournament ? { ...fullTournament, matches: dedupeTournamentMatches(fullTournament.matches) } : null,
       normalized: { status: hltvData?.ok ? "SUCCESS" : "PARTIAL", error: hltvData?.error } 
     });
   }
@@ -177,7 +197,7 @@ export async function POST(request: Request) {
   try {
     const apiUrl = discipline.baseApiUrl ?? "https://liquipedia.net/counterstrike/api.php";
     
-    const { tournament, normalized } = await importTournamentRecursive({
+    const importResult = await importTournamentRecursive({
       disciplineId: discipline.id,
       disciplineSlug: "counterstrike",
       apiUrl,
@@ -188,6 +208,7 @@ export async function POST(request: Request) {
       importRecordId: tournamentImport.id,
       force: body.force
     });
+    const { tournament, normalized } = importResult;
 
     await prisma.tournamentImport.update({
       where: { id: tournamentImport.id },
@@ -202,7 +223,17 @@ export async function POST(request: Request) {
       include: { participants: true, matches: true, lastImport: true }
     });
 
-    return NextResponse.json({ tournament: fullTournament, normalized });
+    return NextResponse.json({
+      tournament: fullTournament ? { ...fullTournament, matches: dedupeTournamentMatches(fullTournament.matches) } : null,
+      normalized,
+      cacheHit: importResult.cacheHit,
+      cacheLayer: importResult.cacheLayer,
+      stale: importResult.stale,
+      warning: importResult.warning,
+      qualityScore: importResult.qualityScore,
+      requestStats: importResult.requestStats,
+      sourceBreakdown: importResult.sourceBreakdown,
+    });
   } catch (error) {
     console.error(error);
     await prisma.tournamentImport.update({

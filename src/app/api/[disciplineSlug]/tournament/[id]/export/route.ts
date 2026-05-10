@@ -2,14 +2,15 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { buildFixtPayload } from "@/lib/adminUpload/buildFixtPayload";
 import { matchesToCsv, participantsToCsv, tournamentToMarkdown } from "@/lib/exporters/tournament";
+import { dedupeTournamentMatches } from "@/lib/matches/dedupe";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(
   request: Request,
-  { params }: { params: { disciplineSlug: string; id: string } }
+  { params }: { params: Promise<{ disciplineSlug: string; id: string }> }
 ) {
-  const { disciplineSlug, id } = params;
+  const { disciplineSlug, id } = await params;
   const { searchParams } = new URL(request.url);
   const format = searchParams.get("format") ?? "json";
   const type = searchParams.get("type") ?? "matches";
@@ -30,6 +31,11 @@ export async function GET(
   if (!tournament) {
     return NextResponse.json({ error: "Tournament not found" }, { status: 404 });
   }
+
+  const dedupedTournament = {
+    ...tournament,
+    matches: dedupeTournamentMatches(tournament.matches),
+  };
 
   // Admin-ready format (JSON/PHP)
   if (format === "json" || format === "php") {
@@ -53,8 +59,8 @@ export async function GET(
   // Legacy/Detailed formats
   if (format === "csv") {
     const csv = type === "participants"
-      ? participantsToCsv(tournament as any)
-      : matchesToCsv(tournament as any);
+      ? participantsToCsv(dedupedTournament as any)
+      : matchesToCsv(dedupedTournament as any);
 
     return new Response(csv, {
       headers: {
@@ -65,7 +71,7 @@ export async function GET(
   }
 
   if (format === "markdown" || format === "md") {
-    const markdown = tournamentToMarkdown(tournament as any);
+    const markdown = tournamentToMarkdown(dedupedTournament as any);
     return new Response(markdown, {
       headers: {
         "Content-Type": "text/markdown; charset=utf-8",

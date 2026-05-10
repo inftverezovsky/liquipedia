@@ -1,7 +1,36 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
-import { fetchPageWikitext, fetchPageParsed, makeLiquipediaPageUrl } from "@/lib/liquipedia/client";
-import { NormalizedTournament } from "@/lib/normalizers/counterstrikeTournament"; // Standard interface
+import { fetchPageWikitext, fetchPageParsed, fetchPageRevision } from "@/lib/liquipedia/client";
+import { dedupeTournamentMatches } from "@/lib/matches/dedupe";
+import type { NormalizedTournament } from "@/lib/normalizers/types";
+import { isPlaceholderTeam } from "@/lib/teams";
+import {
+  buildMatchCandidateMetadata,
+  computeMatchSetQuality,
+  getMatchSourceConfidence,
+  hasPlaceholderTeams,
+  shouldKeepPreviousMatches,
+} from "@/lib/matches/quality";
+import {
+  findSourceFetchCache,
+  isSourceCacheFresh,
+  isSourceCacheStaleUsable,
+  markSourceFetchAttempt,
+  markSourceFetchFailure,
+  markSourceFetchSuccess,
+  SOURCE_CACHE_TTL_MS,
+  type SourceFetchCacheRecord,
+} from "@/lib/sourceFetchCache";
+import {
+  buildTeamNameCanonicalizer,
+  canonicalizeMatchTeams,
+  canonicalizeParticipants,
+  getTeamMappingLookupKeys,
+} from "@/lib/teams/canonicalize";
+import { createHash } from "crypto";
+
+const IMPORT_MATCH_FUTURE_WINDOW_DAYS = Number(process.env.IMPORT_MATCH_FUTURE_WINDOW_DAYS || 365);
+const IMPORT_MATCH_PAST_GRACE_DAYS = Number(process.env.IMPORT_MATCH_PAST_GRACE_DAYS || 0);
 
 export async function importTournamentRecursive(params: {
   disciplineId: string;
@@ -35,20 +64,13 @@ export async function importTournamentRecursive(params: {
 
   const allMatches = [...(mainResult.matches || [])];
   const allMatchIds = [...(mainResult.processedMatchIds || [])];
+  let finalProcessedMatchIds = allMatchIds;
 
   // 2. Process Sub-pages (one level deep)
   if (mainResult.normalized.subPages && mainResult.normalized.subPages.length > 0) {
-    const subPageTitles = mainResult.normalized.subPages.map((url: string) => {
-      return decodeURIComponent(url.split("/").pop() ?? "").replace(/_/g, " ");
-    });
-
-    const { fetchPagesWikitext } = await import("@/lib/liquipedia/client");
-    const preFetchedWikitexts = await fetchPagesWikitext(apiUrl, disciplineSlug, subPageTitles);
-    const wikitextMap = new Map(preFetchedWikitexts.map((p: any) => [p.title.toLowerCase(), p]));
-
     const subResults = await Promise.all(mainResult.normalized.subPages.map(async (subUrl: string) => {
       try {
-        const subTitle = decodeURIComponent(subUrl.split("/").pop() ?? "").replace(/_/g, " ");
+        const subTitle = titleFromLiquipediaUrl(subUrl, disciplineSlug);
         const res = await processSinglePage({
           disciplineId,
           disciplineSlug,
@@ -59,7 +81,6 @@ export async function importTournamentRecursive(params: {
           importRecordId,
           force,
           tournamentId: mainResult.tournament.id,
-          preFetchedWikitext: wikitextMap.get(subTitle.toLowerCase())?.wikitext,
           clearMatches: false // Don't clear on subpages!
         });
         return res;
@@ -76,94 +97,103 @@ export async function importTournamentRecursive(params: {
   }
 
   // 3. FINAL BULK INSERT (One big push for everything!)
+  const existingBeforeFinal = await prisma.tournamentMatch.findMany({
+    where: { tournamentId: mainResult.tournament.id }
+  });
+  let qualityScore = computeMatchSetQuality(allMatches, existingBeforeFinal);
+  let qualityGateWarning: string | null = null;
+  let qualityGateKeptPrevious = false;
+
   if (allMatches.length > 0) {
     console.log(`[Importer] Performing final bulk insert of ${allMatches.length} matches...`);
+    await canonicalizeMatchesWithTournamentTeams(allMatches, mainResult.tournament.id, disciplineSlug);
     
     // RE-ASSIGN matchIds consistently using the FULL tournament title
     const mainTournamentKey = title.trim();
     for (const m of allMatches) {
-      let dateStr = "";
-      // Try matchDate first
-      if (m.matchDate) {
-        const d = new Date(m.matchDate);
-        if (!isNaN(d.getTime())) {
-          dateStr = d.toISOString().split('T')[0];
-        }
-      }
-      // Fallback to parsing matchDateTime string if matchDate is missing
-      if (!dateStr && m.matchDateTime) {
-        const cleaned = m.matchDateTime.replace(/\s*-\s*/, " ").replace(/\s+[A-Z]{2,5}$/, "");
-        const parsed = new Date(cleaned + "Z");
-        if (!isNaN(parsed.getTime())) {
-          dateStr = parsed.toISOString().split('T')[0];
-        }
-      }
-
+      const identity = buildMatchIdentity(m);
       const teams = [m.teamAId || "unknownA", m.teamBId || "unknownB"].sort();
-      const data = [mainTournamentKey, dateStr, teams[0], teams[1]].join("|");
-      const crypto = await import("crypto");
-      const hash = crypto.createHash("md5").update(data).digest("hex").slice(0, 12);
+      const data = [
+        mainTournamentKey,
+        identity.date,
+        identity.time,
+        teams[0],
+        teams[1],
+        identity.stage,
+        identity.round,
+        identity.format,
+        identity.sourceSlot,
+      ].join("|");
+      const hash = createHash("md5").update(data).digest("hex").slice(0, 12);
       m.matchId = `match_${hash}`;
       m.lpNumericalId = BigInt("0x" + hash.substring(0, 15)) % 9007199254740991n;
       m.tournamentId = mainResult.tournament.id;
-      // CRITICAL FIX: Actually store the dateStr for use in deduplication loop
-      (m as any)._dateStr = dateStr;
+      m.hasPlaceholderTeams = hasPlaceholderTeams(m);
+      m.sourceConfidence = getMatchSourceConfidence(m);
+      m.sourceBreakdown = buildMatchCandidateMetadata(m, "liquipedia") as Prisma.InputJsonValue;
+      (m as any)._identity = identity;
     }
 
-    // DEDUPLICATE internally before inserting
-    const uniqueMatchesMap = new Map<string, any>();
-    for (const m of allMatches) {
-      const datePart = (m as any)._dateStr || "no-date";
-      const teamA = (m.teamAId || "unknownA").toLowerCase().trim();
-      const teamB = (m.teamBId || "unknownB").toLowerCase().trim();
-      const teams = [teamA, teamB].sort();
-      const dedupeKey = `${datePart}|${teams[0]}|${teams[1]}`;
-      
-      const existing = uniqueMatchesMap.get(dedupeKey);
-
-      if (!existing) {
-        uniqueMatchesMap.set(dedupeKey, m);
-      } else {
-        // MERGE LOGIC: Keep the earlier match if times differ
-        let preferred = existing;
-        const existingDate = existing.matchDate ? new Date(existing.matchDate) : null;
-        const currentDate = m.matchDate ? new Date(m.matchDate) : null;
-        
-        if (existingDate && currentDate && currentDate < existingDate) {
-          preferred = m;
-        }
-        
-        uniqueMatchesMap.set(dedupeKey, {
-          ...existing,
-          ...m,
-          matchId: preferred.matchId, // Keep the ID of the earlier one
-          matchDate: preferred.matchDate || existing.matchDate,
-          matchDateTime: preferred.matchDateTime || existing.matchDateTime,
-          platformId: existing.platformId || m.platformId,
-          lpNumericalId: existing.lpNumericalId || m.lpNumericalId
-        });
-      }
-    }
-    const deduplicatedMatches = Array.from(uniqueMatchesMap.values()).map(m => {
-      const { _dateStr, ...rest } = m;
+    const deduplicatedMatches = dedupeTournamentMatches(allMatches).map(m => {
+      const { _identity, ...rest } = m;
       return rest;
     });
+    finalProcessedMatchIds = deduplicatedMatches.map((match: any) => match.matchId).filter(Boolean);
+    qualityScore = computeMatchSetQuality(deduplicatedMatches, existingBeforeFinal);
 
-    // 1.5 ALWAYS clear all matches first for a fresh start to avoid phantom duplicates
-    await prisma.tournamentMatch.deleteMany({
-      where: { tournamentId: mainResult.tournament.id }
+    if (deduplicatedMatches.length !== allMatches.length) {
+      console.log(`[Importer] Removed ${allMatches.length - deduplicatedMatches.length} duplicate matches before insert.`);
+    }
+
+    qualityGateKeptPrevious = shouldKeepPreviousMatches({
+      newMatches: deduplicatedMatches,
+      previousMatches: existingBeforeFinal,
+      newQualityScore: qualityScore,
+      sourceHadError: Boolean(mainResult.warning),
     });
 
-    await prisma.tournamentMatch.createMany({
-      data: deduplicatedMatches,
-      skipDuplicates: true
+    if (qualityGateKeptPrevious) {
+      qualityGateWarning = `Новый импорт выглядит хуже предыдущего snapshot (${deduplicatedMatches.length} vs ${existingBeforeFinal.length} матчей, quality=${qualityScore}). Старые матчи сохранены.`;
+      finalProcessedMatchIds = existingBeforeFinal.map((match: any) => match.matchId).filter(Boolean);
+      await appendTournamentWarning(mainResult.tournament.id, qualityGateWarning);
+      console.warn(`[Importer] ${qualityGateWarning}`);
+    } else {
+      await prisma.tournamentMatch.deleteMany({
+        where: { tournamentId: mainResult.tournament.id }
+      });
+
+      await prisma.tournamentMatch.createMany({
+        data: deduplicatedMatches,
+        skipDuplicates: true
+      });
+    }
+  } else {
+    qualityGateKeptPrevious = shouldKeepPreviousMatches({
+      newMatches: [],
+      previousMatches: existingBeforeFinal,
+      newQualityScore: qualityScore,
+      sourceHadError: Boolean(mainResult.warning),
     });
+
+    if (qualityGateKeptPrevious) {
+      qualityGateWarning = `Источник вернул 0 матчей, поэтому предыдущие ${existingBeforeFinal.length} матчей сохранены.`;
+      finalProcessedMatchIds = existingBeforeFinal.map((match: any) => match.matchId).filter(Boolean);
+      await appendTournamentWarning(mainResult.tournament.id, qualityGateWarning);
+      console.warn(`[Importer] ${qualityGateWarning}`);
+    } else {
+      await prisma.tournamentMatch.deleteMany({
+        where: { tournamentId: mainResult.tournament.id }
+      });
+    }
   }
 
   console.log(`[Importer] Completed optimized import for ${title} in ${Date.now() - startTime}ms`);
   return {
     ...mainResult,
-    processedMatchIds: allMatchIds
+    processedMatchIds: finalProcessedMatchIds,
+    qualityScore,
+    warning: qualityGateWarning || mainResult.warning || null,
+    qualityGateKeptPrevious,
   };
 }
 
@@ -178,71 +208,210 @@ async function processSinglePage(params: {
   importRecordId: string;
   tournamentId?: string;
   force?: boolean;
-  preFetchedWikitext?: any;
   clearMatches?: boolean;
 }) {
-  const { disciplineSlug, apiUrl, pageId, title, pageUrl, normalizer, importRecordId, tournamentId, force, preFetchedWikitext, clearMatches } = params;
+  const { disciplineSlug, apiUrl, pageId, title, pageUrl, normalizer, importRecordId, tournamentId, force, clearMatches = true } = params;
 
   try {
-    // 1. Check for cached snapshot (Default 1 hour cache, unless forced)
-    const cacheThreshold = new Date(Date.now() - 1 * 60 * 60 * 1000); // 1 hour
-    const cachedSnapshot = !force ? await prisma.rawSnapshot.findFirst({
-      where: {
-        pageTitle: title,
-        fetchedAt: { gte: cacheThreshold }
-      },
-      orderBy: { fetchedAt: 'desc' }
-    }) : null;
-
-    let wikitext: string;
-    let pageTitle: string;
-    let rawJson: any;
+    let wikitext = "";
+    let pageTitle = title;
+    let rawJson: any = {};
     let parsedHtml: string | undefined;
     let currentPageId: number | undefined = pageId;
+    let rawSnapshot: any | null = null;
+    let cacheHit = false;
+    let cacheLayer: string | null = null;
+    let stale = false;
+    let warning: string | null = null;
+    let externalRequests = 0;
 
-    if (cachedSnapshot && cachedSnapshot.rawWikitext && cachedSnapshot.rawHtml) {
-      console.log(`[Importer] Using cached data for ${title}`);
-      wikitext = cachedSnapshot.rawWikitext;
-      pageTitle = cachedSnapshot.pageTitle;
-      rawJson = cachedSnapshot.rawJson;
-      parsedHtml = cachedSnapshot.rawHtml;
-      currentPageId = cachedSnapshot.pageId ?? pageId;
-    } else {
-      // Fetch
-      console.log(`[Importer] Fetching data for ${title}`);
-      
-      if (preFetchedWikitext) {
-        wikitext = preFetchedWikitext.wikitext;
-        pageTitle = preFetchedWikitext.title;
-        rawJson = preFetchedWikitext.raw;
-        currentPageId = preFetchedWikitext.pageId;
-        // Still need to fetch parsed HTML
-        parsedHtml = await fetchPageParsed(apiUrl, pageTitle);
+    const cacheInput = {
+      source: "liquipedia",
+      disciplineSlug,
+      resourceType: "page",
+      resourceKey: titleKey(title),
+      mode: "cache-first",
+    };
+    let sourceCache: SourceFetchCacheRecord | null = !force
+      ? await findSourceFetchCache(cacheInput)
+      : null;
+
+    if (!force && sourceCache?.rawSnapshotId && isSourceCacheFresh(sourceCache)) {
+      rawSnapshot = await prisma.rawSnapshot.findUnique({ where: { id: sourceCache.rawSnapshotId } });
+      if (rawSnapshot?.rawWikitext) {
+        cacheHit = true;
+        cacheLayer = sourceCache.cacheLayer || "source-fetch-cache";
       } else {
-        // Parallel fetch wikitext and parsed html
+        rawSnapshot = null;
+      }
+    }
+
+    if (!force && !rawSnapshot) {
+      const cacheThreshold = new Date(Date.now() - SOURCE_CACHE_TTL_MS.liquipediaImport);
+      rawSnapshot = await prisma.rawSnapshot.findFirst({
+        where: {
+          pageTitle: title,
+          OR: [
+            { disciplineSlug },
+            { disciplineSlug: null }
+          ],
+          fetchedAt: { gte: cacheThreshold }
+        },
+        orderBy: { fetchedAt: "desc" }
+      });
+      if (rawSnapshot?.rawWikitext) {
+        cacheHit = true;
+        cacheLayer = "raw-snapshot";
+      } else {
+        rawSnapshot = null;
+      }
+    }
+
+    if (!force && !rawSnapshot && sourceCache?.rawSnapshotId) {
+      try {
+        const revision = await fetchPageRevision(apiUrl, disciplineSlug, { pageId, title });
+        externalRequests += 1;
+        const revisionUnchanged = Boolean(revision.revisionId && sourceCache.revisionId === revision.revisionId);
+        if (revisionUnchanged) {
+          const revisionSnapshot = await prisma.rawSnapshot.findUnique({ where: { id: sourceCache.rawSnapshotId } });
+          if (revisionSnapshot?.rawWikitext) {
+            rawSnapshot = revisionSnapshot;
+            cacheHit = true;
+            cacheLayer = "revision-cache";
+            await markSourceFetchSuccess(cacheInput, {
+              revisionId: revision.revisionId,
+              revisionTimestamp: revision.revisionTimestamp,
+              rawSnapshotId: revisionSnapshot.id,
+              externalRequests,
+              cacheLayer,
+              metadata: {
+                title: revision.title,
+                pageId: revision.pageId ?? null,
+                fullUrl: revision.fullUrl,
+                revisionChecked: true,
+              },
+            });
+          }
+        }
+      } catch (revisionError) {
+        warning = `Не удалось проверить revision для ${title}: ${revisionError instanceof Error ? revisionError.message : "unknown error"}`;
+        await markSourceFetchFailure(cacheInput, {
+          errorClass: "revision_check_failed",
+          externalRequests,
+        });
+      }
+    }
+
+    if (rawSnapshot?.rawWikitext) {
+      console.log(`[Importer] Using ${cacheLayer || "cached"} data for ${title}`);
+      wikitext = rawSnapshot.rawWikitext;
+      pageTitle = rawSnapshot.pageTitle;
+      rawJson = rawSnapshot.rawJson;
+      parsedHtml = rawSnapshot.rawHtml || undefined;
+      currentPageId = rawSnapshot.pageId ?? pageId;
+    } else {
+      console.log(`[Importer] Fetching data for ${title}`);
+      await markSourceFetchAttempt(cacheInput);
+
+      try {
         const [page, html] = await Promise.all([
           fetchPageWikitext(apiUrl, disciplineSlug, { pageId, title }),
           fetchPageParsed(apiUrl, title)
         ]);
+        externalRequests += 2;
         wikitext = page.wikitext;
         pageTitle = page.title;
         rawJson = page.raw;
         parsedHtml = html;
         currentPageId = page.pageId;
-      }
 
-      // Save Snapshot (Fire and forget or wait? Better wait to ensure data integrity)
-      await prisma.rawSnapshot.create({
-        data: {
-          tournamentImportId: importRecordId,
-          source: "liquipedia-mediawiki-api",
-          pageId: currentPageId,
-          pageTitle,
-          rawJson: rawJson as Prisma.InputJsonValue,
-          rawWikitext: wikitext,
-          rawHtml: parsedHtml
+        const contentHash = createHash("sha1").update(wikitext).digest("hex");
+        rawSnapshot = await prisma.rawSnapshot.create({
+          data: {
+            tournamentImportId: importRecordId,
+            source: "liquipedia-mediawiki-api",
+            disciplineSlug,
+            pageId: currentPageId,
+            pageTitle,
+            contentHash,
+            revisionId: extractRevisionId(rawJson),
+            revisionTimestamp: extractRevisionTimestamp(rawJson),
+            rawJson: rawJson as Prisma.InputJsonValue,
+            rawWikitext: wikitext,
+            rawHtml: parsedHtml,
+            metadata: {
+              resourceType: "page",
+              resourceKey: titleKey(pageTitle),
+              mode: "cache-first",
+            } as Prisma.InputJsonValue,
+          }
+        });
+
+        await markSourceFetchSuccess(cacheInput, {
+          revisionId: rawSnapshot.revisionId,
+          revisionTimestamp: rawSnapshot.revisionTimestamp,
+          contentHash,
+          rawSnapshotId: rawSnapshot.id,
+          externalRequests,
+          cacheLayer: "network",
+          metadata: {
+            title: pageTitle,
+            pageId: currentPageId ?? null,
+            pageUrl,
+          },
+        });
+      } catch (fetchError) {
+        await markSourceFetchFailure(cacheInput, {
+          errorClass: "source_fetch_failed",
+          externalRequests,
+        });
+
+        sourceCache = sourceCache || await findSourceFetchCache(cacheInput);
+        if (sourceCache?.rawSnapshotId && isSourceCacheStaleUsable(sourceCache)) {
+          const staleSnapshot = await prisma.rawSnapshot.findUnique({ where: { id: sourceCache.rawSnapshotId } });
+          if (staleSnapshot?.rawWikitext) {
+            rawSnapshot = staleSnapshot;
+            wikitext = staleSnapshot.rawWikitext;
+            pageTitle = staleSnapshot.pageTitle;
+            rawJson = staleSnapshot.rawJson;
+            parsedHtml = staleSnapshot.rawHtml || undefined;
+            currentPageId = staleSnapshot.pageId ?? pageId;
+            cacheHit = true;
+            cacheLayer = "stale-if-error";
+            stale = true;
+            warning = `Источник недоступен, показан последний хороший snapshot для ${title}.`;
+          } else {
+            throw fetchError;
+          }
+        } else {
+          const fallbackSnapshot = await prisma.rawSnapshot.findFirst({
+            where: {
+              pageTitle: title,
+              OR: [
+                { disciplineSlug },
+                { disciplineSlug: null }
+              ],
+              fetchedAt: { gte: new Date(Date.now() - SOURCE_CACHE_TTL_MS.liquipediaStale) }
+            },
+            orderBy: { fetchedAt: "desc" }
+          });
+
+          if (fallbackSnapshot?.rawWikitext) {
+            rawSnapshot = fallbackSnapshot;
+            wikitext = fallbackSnapshot.rawWikitext;
+            pageTitle = fallbackSnapshot.pageTitle;
+            rawJson = fallbackSnapshot.rawJson;
+            parsedHtml = fallbackSnapshot.rawHtml || undefined;
+            currentPageId = fallbackSnapshot.pageId ?? pageId;
+            cacheHit = true;
+            cacheLayer = "raw-snapshot-stale-if-error";
+            stale = true;
+            warning = `Источник недоступен, использован stale snapshot для ${title}.`;
+          } else {
+            throw fetchError;
+          }
         }
-      });
+      }
     }
 
     // Normalize
@@ -253,6 +422,14 @@ async function processSinglePage(params: {
       wikitext,
       parsedHtml
     });
+    normalized.cacheHit = cacheHit;
+    normalized.cacheLayer = cacheLayer;
+    normalized.stale = stale;
+    normalized.warning = warning;
+    normalized.requestStats = {
+      externalRequests,
+      sourceCacheExternalRequests: sourceCache?.externalRequests ?? 0,
+    };
 
     // Upsert Tournament (only for main page, or update existing)
     const tournament = await prisma.tournament.upsert({
@@ -264,7 +441,13 @@ async function processSinglePage(params: {
       },
       update: {
         extractionStatus: normalized.status,
-        normalization: { warnings: normalized.warnings } as Prisma.InputJsonValue,
+        normalization: {
+          warnings: warning ? Array.from(new Set([...normalized.warnings, warning])) : normalized.warnings,
+          cacheHit,
+          cacheLayer,
+          stale,
+          requestStats: normalized.requestStats,
+        } as Prisma.InputJsonValue,
         lastImportId: importRecordId
       },
       create: {
@@ -282,21 +465,36 @@ async function processSinglePage(params: {
         formatText: normalized.formatText,
         status: normalized.tournamentStatus,
         extractionStatus: normalized.status,
-        normalization: { warnings: normalized.warnings } as Prisma.InputJsonValue,
+        normalization: {
+          warnings: warning ? Array.from(new Set([...normalized.warnings, warning])) : normalized.warnings,
+          cacheHit,
+          cacheLayer,
+          stale,
+          requestStats: normalized.requestStats,
+        } as Prisma.InputJsonValue,
         lastImportId: importRecordId
       }
     });
 
+    const disciplineMappings = await prisma.teamMapping.findMany({
+      where: { disciplineSlug }
+    });
+    const teamCanonicalizer = buildTeamNameCanonicalizer({
+      participants: normalized.participants,
+      mappings: disciplineMappings,
+      extraNames: normalized.matches.flatMap((match: any) => [match.teamAName, match.teamBName]),
+    });
+    normalized.participants = canonicalizeParticipants(normalized.participants, teamCanonicalizer);
+    normalized.matches = normalized.matches.map((match: any) => canonicalizeMatchTeams(match, teamCanonicalizer));
+
     // Save Participants (only if not already there or merge)
     if (normalized.participants.length > 0) {
-      // Optimization: Bulk fetch ALL team mappings for this discipline once
-      const disciplineMappings = await prisma.teamMapping.findMany({
-        where: { disciplineSlug }
-      });
-      
       const mappingMap = new Map(disciplineMappings.map((m: any) => [m.liquipediaName.toLowerCase(), m]));
       const aliasMap = new Map<string, any>();
       disciplineMappings.forEach((m: any) => {
+        for (const key of getTeamMappingLookupKeys(m)) {
+          aliasMap.set(key.toLowerCase(), m);
+        }
         if (m.alias) {
           m.alias.split(',').forEach((a: string) => aliasMap.set(a.trim().toLowerCase(), m));
         }
@@ -327,10 +525,14 @@ async function processSinglePage(params: {
       });
 
       if (participantsToInsert.length > 0) {
-        await prisma.$transaction([
-          prisma.tournamentParticipant.deleteMany({ where: { tournamentId: tournament.id } }),
-          prisma.tournamentParticipant.createMany({ data: participantsToInsert, skipDuplicates: true })
-        ]);
+        if (clearMatches !== false) {
+          await prisma.$transaction([
+            prisma.tournamentParticipant.deleteMany({ where: { tournamentId: tournament.id } }),
+            prisma.tournamentParticipant.createMany({ data: participantsToInsert, skipDuplicates: true })
+          ]);
+        } else {
+          await prisma.tournamentParticipant.createMany({ data: participantsToInsert, skipDuplicates: true });
+        }
       }
 
       // Ensure TeamMappings exist globally (non-blocking)
@@ -366,25 +568,23 @@ async function processSinglePage(params: {
         }
       });
 
-      // 1.5 ALWAYS clear all matches first for a fresh start to avoid phantom duplicates
-      await prisma.tournamentMatch.deleteMany({
-        where: { tournamentId: tournament.id }
-      });
-
-      // 2. Prepare data (FILTERING: Only upcoming, no results, Today + 7 days)
+      // 2. Prepare data (FILTERING: upcoming/unplayed only, with a configurable future window)
       const today = new Date();
       today.setHours(0, 0, 0, 0);
-      const oneWeekForward = new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000);
+      const pastLimit = new Date(today.getTime() - IMPORT_MATCH_PAST_GRACE_DAYS * 24 * 60 * 60 * 1000);
+      const futureLimit = new Date(today.getTime() + IMPORT_MATCH_FUTURE_WINDOW_DAYS * 24 * 60 * 60 * 1000);
 
       matchesToInsert = normalized.matches
         .filter((m: any) => {
           // Skip matches with results
           if (m.scoreA !== null || m.scoreB !== null) return false;
+          if (isFinishedMatchStatus(m.status)) return false;
+          if (!m.matchDate && normalized.tournamentStatus === "finished") return false;
           
-          // Skip past matches (older than today) or too far in future (> 7 days)
+          // Skip past matches and far-future noise, but keep undated announced matches.
           if (m.matchDate) {
             const mDate = new Date(m.matchDate);
-            if (mDate < today || mDate > oneWeekForward) return false;
+            if (mDate < pastLimit || mDate > futureLimit) return false;
           }
           
           return true;
@@ -416,20 +616,23 @@ async function processSinglePage(params: {
             status: m.status,
             court: m.court,
             sourceUrl: m.sourceUrl,
-            rawText: m.rawText
+            rawText: m.rawText,
+            hasPlaceholderTeams: hasPlaceholderTeams(m),
+            sourceConfidence: getMatchSourceConfidence(m),
+            sourceBreakdown: buildMatchCandidateMetadata(m, "liquipedia") as Prisma.InputJsonValue
           };
         });
 
       // 4. Ensure TeamMappings (non-blocking)
       for (const m of normalized.matches) {
-        if (m.teamAName && !m.teamAName.includes("TBD")) {
+        if (m.teamAName && !isPlaceholderTeam(m.teamAName)) {
           prisma.teamMapping.upsert({
             where: { disciplineSlug_liquipediaName: { disciplineSlug, liquipediaName: m.teamAName } },
             update: {},
             create: { disciplineSlug, liquipediaName: m.teamAName }
           }).catch(() => {});
         }
-        if (m.teamBName && !m.teamBName.includes("TBD")) {
+        if (m.teamBName && !isPlaceholderTeam(m.teamBName)) {
           prisma.teamMapping.upsert({
             where: { disciplineSlug_liquipediaName: { disciplineSlug, liquipediaName: m.teamBName } },
             update: {},
@@ -439,14 +642,198 @@ async function processSinglePage(params: {
       }
     }
 
+    const pageQualityScore = computeMatchSetQuality(matchesToInsert);
+    normalized.qualityScore = pageQualityScore;
+    normalized.sourceBreakdown = {
+      liquipedia: {
+        pageTitle,
+        pageId: currentPageId ?? null,
+        matches: matchesToInsert.length,
+        placeholders: matchesToInsert.filter((match) => hasPlaceholderTeams(match)).length,
+        cacheHit,
+        cacheLayer,
+        stale,
+      },
+    };
+
+    if (rawSnapshot?.id) {
+      await prisma.rawSnapshot.update({
+        where: { id: rawSnapshot.id },
+        data: {
+          qualityScore: pageQualityScore,
+          metadata: {
+            resourceType: "page",
+            resourceKey: titleKey(pageTitle),
+            mode: "cache-first",
+            cacheHit,
+            cacheLayer,
+            stale,
+            warning,
+            matchesCount: matchesToInsert.length,
+            placeholdersCount: matchesToInsert.filter((match) => hasPlaceholderTeams(match)).length,
+          } as Prisma.InputJsonValue,
+        },
+      }).catch(() => {});
+
+      await markSourceFetchSuccess(cacheInput, {
+        revisionId: rawSnapshot.revisionId,
+        revisionTimestamp: rawSnapshot.revisionTimestamp,
+        contentHash: rawSnapshot.contentHash,
+        rawSnapshotId: rawSnapshot.id,
+        qualityScore: pageQualityScore,
+        externalRequests: 0,
+        cacheLayer: cacheLayer || (cacheHit ? "raw-snapshot" : "network"),
+        metadata: {
+          title: pageTitle,
+          pageId: currentPageId ?? null,
+          matchesCount: matchesToInsert.length,
+          placeholdersCount: matchesToInsert.filter((match) => hasPlaceholderTeams(match)).length,
+          stale,
+        },
+      });
+    }
+
     return { 
       tournament, 
       normalized, 
       matches: matchesToInsert,
-      processedMatchIds: normalized.matches.map((m: any) => m.matchId).filter((id: any): id is string => !!id)
+      processedMatchIds: normalized.matches.map((m: any) => m.matchId).filter((id: any): id is string => !!id),
+      cacheHit,
+      cacheLayer,
+      stale,
+      warning,
+      requestStats: normalized.requestStats,
+      sourceBreakdown: normalized.sourceBreakdown,
+      qualityScore: pageQualityScore,
     };
   } catch (error) {
     console.error(`[Importer] Error processing page ${title}:`, error);
     throw error;
   }
+}
+
+async function canonicalizeMatchesWithTournamentTeams(matches: any[], tournamentId: string, disciplineSlug: string) {
+  const [participants, mappings] = await Promise.all([
+    prisma.tournamentParticipant.findMany({
+      where: { tournamentId },
+      select: { name: true, rawText: true, platformId: true, logoUrl: true },
+    }),
+    prisma.teamMapping.findMany({ where: { disciplineSlug } }),
+  ]);
+
+  const canonicalizer = buildTeamNameCanonicalizer({
+    participants,
+    mappings,
+    extraNames: matches.flatMap((match: any) => [match.teamAName, match.teamBName]),
+  });
+
+  for (const match of matches) {
+    Object.assign(match, canonicalizeMatchTeams(match, canonicalizer));
+  }
+}
+
+async function appendTournamentWarning(tournamentId: string, warning: string) {
+  const tournament = await prisma.tournament.findUnique({
+    where: { id: tournamentId },
+    select: { normalization: true },
+  });
+  const normalization = isPlainObject(tournament?.normalization)
+    ? tournament?.normalization as Record<string, unknown>
+    : {};
+  const existingWarnings = Array.isArray(normalization.warnings)
+    ? normalization.warnings.filter((item): item is string => typeof item === "string")
+    : [];
+
+  await prisma.tournament.update({
+    where: { id: tournamentId },
+    data: {
+      extractionStatus: "PARTIAL",
+      normalization: {
+        ...normalization,
+        warnings: Array.from(new Set([...existingWarnings, warning])),
+        qualityGateKeptPrevious: true,
+      } as Prisma.InputJsonValue,
+    },
+  });
+}
+
+function extractRevisionId(rawJson: any) {
+  const revision = rawJson?.query?.pages?.[0]?.revisions?.[0];
+  return typeof revision?.revid === "number" ? revision.revid : null;
+}
+
+function extractRevisionTimestamp(rawJson: any) {
+  const revision = rawJson?.query?.pages?.[0]?.revisions?.[0];
+  if (!revision?.timestamp) return null;
+  const parsed = new Date(revision.timestamp);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function buildMatchIdentity(match: any) {
+  const parsedDate = parseMatchDate(match);
+  const placeholder = hasPlaceholderTeams(match);
+  const sourceSlot = placeholder
+    ? normalizeIdentityPart(match.rawText || match.sourceUrl || match.matchId)
+    : (parsedDate || match.matchDateTime ? "" : normalizeIdentityPart(match.matchId));
+
+  return {
+    date: parsedDate ? parsedDate.toISOString().slice(0, 10) : "no-date",
+    time: parsedDate ? parsedDate.toISOString().slice(11, 16) : normalizeIdentityPart(match.matchDateTime),
+    stage: normalizeIdentityPart(match.stage),
+    round: normalizeIdentityPart(match.round),
+    format: normalizeIdentityPart(match.format),
+    sourceSlot,
+  };
+}
+
+function parseMatchDate(match: any): Date | null {
+  if (match.matchDate) {
+    const date = new Date(match.matchDate);
+    if (!Number.isNaN(date.getTime())) return date;
+  }
+
+  if (match.matchDateTime) {
+    const cleaned = String(match.matchDateTime)
+      .replace(/\s*-\s*/, " ")
+      .replace(/\s+[A-Z]{2,5}$/, "")
+      .trim();
+    const parsed = new Date(`${cleaned}Z`);
+    if (!Number.isNaN(parsed.getTime())) return parsed;
+  }
+
+  return null;
+}
+
+function normalizeIdentityPart(value: unknown) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function isFinishedMatchStatus(status: unknown) {
+  return /\b(finished|completed|complete|closed|done|walkover|cancelled|canceled)\b/i.test(String(status || ""));
+}
+
+function titleFromLiquipediaUrl(pageUrl: string, disciplineSlug: string) {
+  try {
+    const parsed = new URL(pageUrl);
+    const marker = `/${disciplineSlug}/`;
+    const markerIndex = parsed.pathname.indexOf(marker);
+    if (markerIndex >= 0) {
+      return decodeURIComponent(parsed.pathname.slice(markerIndex + marker.length)).replace(/_/g, " ");
+    }
+  } catch {
+    // Fall back below.
+  }
+
+  return decodeURIComponent(pageUrl.split("/").filter(Boolean).slice(-2).join("/")).replace(/_/g, " ");
+}
+
+function titleKey(title: string) {
+  return title.replace(/_/g, " ").replace(/\s+/g, " ").trim().toLowerCase();
 }

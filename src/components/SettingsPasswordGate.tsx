@@ -5,23 +5,33 @@ import { useState, useEffect } from "react";
 export function SettingsPasswordGate({ children }: { children: React.ReactNode }) {
   const [unlocked, setUnlocked] = useState(false);
   const [password, setPassword] = useState("");
-  const [correctPassword, setCorrectPassword] = useState<string | null>(null);
   const [error, setError] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("/api/settings")
+    fetch("/api/admin-auth/session", { cache: "no-store" })
       .then(r => r.json())
       .then(data => {
-        setCorrectPassword(data["admin_password"] || "63016");
+        setUnlocked(Boolean(data.authenticated));
+        setLoading(false);
+      })
+      .catch(() => {
+        setUnlocked(false);
         setLoading(false);
       });
   }, []);
 
-  const handleUnlock = () => {
-    if (password === correctPassword) {
+  const handleUnlock = async () => {
+    const response = await fetch("/api/admin-auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password }),
+    });
+
+    if (response.ok) {
       setUnlocked(true);
       setError(false);
+      setPassword("");
     } else {
       setError(true);
       setTimeout(() => setError(false), 2000);

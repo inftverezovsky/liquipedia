@@ -7,6 +7,10 @@ export interface AdminHttpClientOptions {
   headers: Record<string, string>;
 }
 
+function resolveRuntimeFilePath(filePath: string): string {
+  return path.resolve(/*turbopackIgnore: true*/ process.cwd(), filePath);
+}
+
 /**
  * Server-side helper to configure mTLS and Auth for Admin API requests.
  * Reads configuration from environment variables.
@@ -48,7 +52,7 @@ export function getAdminHttpClientOptions(): AdminHttpClientOptions {
         if (passphrase) agentOptions.passphrase = passphrase;
         hasAgent = true;
       } else if (pfxPath) {
-        const resolvedPath = path.resolve(process.cwd(), pfxPath);
+        const resolvedPath = resolveRuntimeFilePath(pfxPath);
         if (fs.existsSync(resolvedPath)) {
           agentOptions.pfx = fs.readFileSync(resolvedPath);
           if (passphrase) agentOptions.passphrase = passphrase;
@@ -70,7 +74,7 @@ export function getAdminHttpClientOptions(): AdminHttpClientOptions {
         agentOptions.cert = Buffer.from(certBase64, 'base64');
         hasAgent = true;
       } else if (certPath) {
-        const resolvedCert = path.resolve(process.cwd(), certPath);
+        const resolvedCert = resolveRuntimeFilePath(certPath);
         if (fs.existsSync(resolvedCert)) {
           agentOptions.cert = fs.readFileSync(resolvedCert);
           hasAgent = true;
@@ -81,7 +85,7 @@ export function getAdminHttpClientOptions(): AdminHttpClientOptions {
         agentOptions.key = Buffer.from(keyBase64, 'base64');
         hasAgent = true;
       } else if (keyPath) {
-        const resolvedKey = path.resolve(process.cwd(), keyPath);
+        const resolvedKey = resolveRuntimeFilePath(keyPath);
         if (fs.existsSync(resolvedKey)) {
           agentOptions.key = fs.readFileSync(resolvedKey);
           hasAgent = true;
@@ -91,7 +95,7 @@ export function getAdminHttpClientOptions(): AdminHttpClientOptions {
       if (caBase64) {
         agentOptions.ca = Buffer.from(caBase64, 'base64');
       } else if (caPath) {
-        const resolvedCa = path.resolve(process.cwd(), caPath);
+        const resolvedCa = resolveRuntimeFilePath(caPath);
         if (fs.existsSync(resolvedCa)) {
           agentOptions.ca = fs.readFileSync(resolvedCa);
         }

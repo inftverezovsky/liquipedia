@@ -1,0 +1,172 @@
+import { isPlaceholderTeam, normalizeTeamName } from "@/lib/teams";
+import { getTeamAliasKey } from "@/lib/teams/canonicalize";
+
+export interface MatchDedupeInput {
+  id?: string | null;
+  matchId?: string | null;
+  lpNumericalId?: bigint | number | string | null;
+  platformId?: string | null;
+  matchDate?: Date | string | number | null;
+  matchDateTime?: string | null;
+  stage?: string | null;
+  round?: string | null;
+  format?: string | null;
+  status?: string | null;
+  court?: string | null;
+  sourceUrl?: string | null;
+  rawText?: string | null;
+  teamAId?: string | null;
+  teamAName?: string | null;
+  teamBId?: string | null;
+  teamBName?: string | null;
+  scoreA?: number | null;
+  scoreB?: number | null;
+  syncedAt?: Date | string | null;
+  createdAt?: Date | string | null;
+}
+
+export function dedupeTournamentMatches<T extends MatchDedupeInput>(matches: readonly T[]): T[] {
+  const byKey = new Map<string, T>();
+  const keys: string[] = [];
+
+  for (const match of matches) {
+    const key = getCanonicalMatchKey(match);
+    const existing = byKey.get(key);
+
+    if (!existing) {
+      byKey.set(key, match);
+      keys.push(key);
+      continue;
+    }
+
+    byKey.set(key, mergePreferredMatch(existing, match));
+  }
+
+  return keys.map((key) => byKey.get(key)).filter((match): match is T => Boolean(match));
+}
+
+export function getCanonicalMatchKey(match: MatchDedupeInput) {
+  const [team1, team2] = [
+    getTeamKey(match.teamAName, match.teamAId, "a"),
+    getTeamKey(match.teamBName, match.teamBId, "b")
+  ].sort();
+
+  const dateBucket = getDateBucket(match);
+  const placeholderContext = hasPlaceholderSide(match)
+    ? [
+        normalizeLoose(match.stage),
+        normalizeLoose(match.round),
+        normalizeLoose(match.format),
+        normalizeLoose(match.court),
+        normalizeLoose(match.rawText) || normalizeLoose(match.matchId) || normalizeLoose(match.sourceUrl)
+      ]
+    : [];
+
+  if (dateBucket !== "date:tbd") {
+    return ["dated", team1, team2, dateBucket, ...placeholderContext].join("|");
+  }
+
+  return [
+    "undated",
+    team1,
+    team2,
+    normalizeLoose(match.stage),
+    normalizeLoose(match.round),
+    normalizeLoose(match.format),
+    normalizeLoose(match.court),
+    ...placeholderContext.slice(4)
+  ].join("|");
+}
+
+export function mergePreferredMatch<T extends MatchDedupeInput>(left: T, right: T): T {
+  const leftScore = scoreMatch(left);
+  const rightScore = scoreMatch(right);
+  const primary = rightScore > leftScore ? right : left;
+  const secondary = primary === right ? left : right;
+  const merged: Record<string, unknown> = {
+    ...(secondary as Record<string, unknown>),
+    ...(primary as Record<string, unknown>)
+  };
+
+  for (const [key, value] of Object.entries(secondary as Record<string, unknown>)) {
+    if (isEmptyValue(merged[key]) && !isEmptyValue(value)) {
+      merged[key] = value;
+    }
+  }
+
+  return merged as T;
+}
+
+function scoreMatch(match: MatchDedupeInput) {
+  let score = 0;
+
+  if (hasValue(match.platformId)) score += 1000;
+  if (parseDateLike(match.matchDate)) score += 300;
+  if (hasValue(match.matchDateTime)) score += 150;
+  if (hasRealTeam(match.teamAName) && hasRealTeam(match.teamBName)) score += 120;
+  if (hasValue(match.stage)) score += 25;
+  if (hasValue(match.round)) score += 25;
+  if (hasValue(match.format)) score += 15;
+  if (hasValue(match.sourceUrl)) score += 10;
+  if (hasValue(match.rawText)) score += 10;
+  if (match.scoreA !== null && match.scoreA !== undefined) score += 8;
+  if (match.scoreB !== null && match.scoreB !== undefined) score += 8;
+  if (hasValue(match.status)) score += 8;
+  if (match.matchId?.startsWith("match_")) score += 5;
+  if (match.lpNumericalId !== null && match.lpNumericalId !== undefined) score += 3;
+
+  return score;
+}
+
+function getTeamKey(name: string | null | undefined, id: string | null | undefined, side: "a" | "b") {
+  const rawName = normalizeLoose(name);
+  const rawId = normalizeLoose(id);
+  const usefulName = rawName && !isPlaceholderTeam(rawName) ? rawName : "";
+  const value = usefulName || rawId || rawName || `unknown-${side}`;
+
+  return getTeamAliasKey(value) || normalizeTeamName(value) || normalizeLoose(value) || `unknown-${side}`;
+}
+
+function getDateBucket(match: MatchDedupeInput) {
+  const parsedDate = parseDateLike(match.matchDate);
+  if (parsedDate) {
+    return `minute:${Math.floor(parsedDate.getTime() / 60000)}`;
+  }
+
+  const textDate = normalizeLoose(match.matchDateTime);
+  if (textDate && !/^(date|date tbd|tbd|-|unknown)$/i.test(textDate)) {
+    return `text:${textDate}`;
+  }
+
+  return "date:tbd";
+}
+
+function parseDateLike(value: Date | string | number | null | undefined) {
+  if (value === null || value === undefined || value === "") return null;
+
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isFinite(date.getTime()) ? date : null;
+}
+
+function normalizeLoose(value: unknown) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
+function hasRealTeam(name: string | null | undefined) {
+  return Boolean(name && !isPlaceholderTeam(name));
+}
+
+function hasPlaceholderSide(match: MatchDedupeInput) {
+  return isPlaceholderTeam(match.teamAName) || isPlaceholderTeam(match.teamBName);
+}
+
+function hasValue(value: unknown) {
+  return !isEmptyValue(value);
+}
+
+function isEmptyValue(value: unknown) {
+  return value === null || value === undefined || value === "";
+}

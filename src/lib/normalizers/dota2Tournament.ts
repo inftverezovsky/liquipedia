@@ -146,7 +146,7 @@ export function normalizeDota2Tournament(input: {
   };
 
   /* ── Extract sub-pages ── */
-  const subPages = input.parsedHtml ? extractSubPages(input.parsedHtml, input.pageUrl) : [];
+  const subPages = extractSubPages(input.wikitext, input.parsedHtml || "", input.pageUrl);
 
   /* ── Extract matches: staged pipeline ── */
   const htmlMatches = input.parsedHtml
@@ -253,8 +253,35 @@ function extractMatchesFromParsedHtml(html: string, pageUrl: string): Normalized
     return "";
   }
 
+  function findPreviousHeadingForElement(el: any, selector: string): string {
+    let current = $(el);
+
+    for (let depth = 0; depth < 10; depth++) {
+      const heading = current.prevAll(selector).first();
+      if (heading.length > 0) {
+        return heading.text().replace(/\[edit\]/g, "").trim();
+      }
+
+      const parent = current.parent();
+      if (parent.length === 0) break;
+      current = parent;
+    }
+
+    return "";
+  }
+
+  function parseScoreText(text: string): [number, number] | null {
+    const match = text.replace(/\s+/g, " ").trim().match(/(\d+)\s*[-:]\s*(\d+)/);
+    if (!match) return null;
+    return [Number(match[1]), Number(match[2])];
+  }
+
   // Shared helper: extract full team name from an opponent element.
   // Priority: aria-label > link title > .name text
+  function isNonTeamTitle(value: string) {
+    return /^(time|date)$/i.test(value) || value.includes("(page does not exist)");
+  }
+
   function getFullTeamName(oppEl: any): string | null {
     const $opp = $(oppEl);
     const aria = $opp.attr("aria-label")?.trim();
@@ -262,9 +289,9 @@ function extractMatchesFromParsedHtml(html: string, pageUrl: string): Normalized
     const parentAria = $opp.closest("[aria-label]").attr("aria-label")?.trim();
     if (parentAria && parentAria !== "TBD") return parentAria;
     const linkTitle = $opp.find(".name a").attr("title")?.trim();
-    if (linkTitle && !linkTitle.includes("Time") && !linkTitle.includes("(page does not exist)")) return linkTitle;
+    if (linkTitle && !isNonTeamTitle(linkTitle)) return linkTitle;
     const teamLink = $opp.find("a[href*='/dota2/']").attr("title")?.trim();
-    if (teamLink && !teamLink.includes("Time") && !teamLink.includes("(page does not exist)")) return teamLink;
+    if (teamLink && !isNonTeamTitle(teamLink)) return teamLink;
     const nameText = $opp.find(".name").text().trim();
     if (nameText) return nameText;
     
@@ -330,7 +357,54 @@ function extractMatchesFromParsedHtml(html: string, pageUrl: string): Normalized
     if (matches.length >= 500) return false;
   });
 
-  // 2. Extract from bracket matches (playoffs)
+  // 2. Extract generated round-robin pairings from Liquipedia crosstables.
+  // These tables often appear before exact times are published, so they produce
+  // valid team pairs with unknown dates rather than pretending there are no matches.
+  $("table.crosstable").each((_, tableEl) => {
+    const $table = $(tableEl);
+    const groupName = findPreviousHeadingForElement(tableEl, ".mw-heading3, h3");
+    const stageName = findPreviousHeadingForElement(tableEl, ".mw-heading2, h2") || "Group Stage";
+    const rows = $table.find("tr.crosstable-tr").map((__, rowEl) => {
+      const $row = $(rowEl);
+      const cells = $row.children("td");
+      if (cells.length < 2) return null;
+
+      const teamName = getFullTeamName($row.children("th").first());
+      if (!teamName || isPlaceholderTeam(teamName)) return null;
+
+      return {
+        teamName,
+        cells,
+        raw: $.html(rowEl)?.slice(0, 2500) || null
+      };
+    }).get().filter((row): row is { teamName: string; cells: any; raw: string | null } => !!row);
+
+    for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+      for (let colIndex = rowIndex + 1; colIndex < rows.length; colIndex++) {
+        const cell = rows[rowIndex].cells.eq(colIndex);
+        if (!cell.length || cell.hasClass("crosstable-bgc-cross")) continue;
+
+        const score = parseScoreText(cell.text());
+        matches.push({
+          stage: stageName,
+          round: groupName || null,
+          matchDate: null,
+          matchDateTime: null,
+          teamAName: rows[rowIndex].teamName,
+          teamBName: rows[colIndex].teamName,
+          scoreA: score?.[0] ?? null,
+          scoreB: score?.[1] ?? null,
+          format: "Round robin",
+          status: score ? "finished" : "upcoming",
+          court: null,
+          sourceUrl: pageUrl,
+          rawText: [rows[rowIndex].raw, $.html(cell)?.slice(0, 1000), rows[colIndex].raw].filter(Boolean).join("\n")
+        });
+      }
+    }
+  });
+
+  // 3. Extract from bracket matches (playoffs)
   $(".brkts-match").each((_, matchEl) => {
     const $match = $(matchEl);
     const opponents = $match.find(".brkts-opponent-entry");
@@ -587,22 +661,12 @@ function dedupeMatches(matches: NormalizedMatch[]): NormalizedMatch[] {
       continue;
     }
 
-    // Also check by team pair + precise date/time + stage
-    const pairKey = [
-      match.teamAName?.toLowerCase(),
-      match.teamBName?.toLowerCase(),
-      match.matchDate?.getTime() ?? match.matchDateTime ?? "",
-      match.stage
-    ].join("|");
+    // Also check by normalized identity, not just pair+day. Same teams can play
+    // more than once in different rounds/stages.
+    const pairKey = matchDedupeKey(match);
 
     const existingByPair = [...seen.values()].find((m) => {
-      const k = [
-        m.teamAName?.toLowerCase(),
-        m.teamBName?.toLowerCase(),
-        m.matchDate?.getTime() ?? m.matchDateTime ?? "",
-        m.stage
-      ].join("|");
-      return k === pairKey;
+      return matchDedupeKey(m) === pairKey;
     });
 
     if (existingByPair) {
@@ -653,13 +717,32 @@ function createStableMatchId(input: {
   const data = [
     tournamentKey,
     dateStr,
+    input.matchDateTime ?? "",
     teams[0],
     teams[1],
-    // We ignore stage/round/extraHint in the ID to merge matches across subpages
+    input.stage ?? "",
+    input.round ?? "",
+    input.extraHint ?? ""
   ].join("|");
   
   const hash = createHash("md5").update(data).digest("hex").slice(0, 12);
   return `match_${hash}`;
+}
+
+function matchDedupeKey(match: NormalizedMatch) {
+  const teams = [
+    (match.teamAName || "").toLowerCase().trim(),
+    (match.teamBName || "").toLowerCase().trim()
+  ].sort();
+  return [
+    teams[0],
+    teams[1],
+    match.matchDate?.getTime() ?? "",
+    (match.matchDateTime || "").toLowerCase().trim(),
+    (match.stage || "").toLowerCase().trim(),
+    (match.round || "").toLowerCase().trim(),
+    (match.format || "").toLowerCase().trim()
+  ].join("|");
 }
 
 export function stringToNumericalId(str: string): bigint {
@@ -755,20 +838,74 @@ function isLikelyTeamName(name: string) {
   return true;
 }
 
-function extractSubPages(html: string, pageUrl: string): string[] {
+const EVENT_SUBPAGE_ALLOWLIST = [
+  "Group_Stage",
+  "Swiss_Stage",
+  "Playoffs",
+  "Bracket",
+  "Main_Event",
+  "Regular_Season",
+  "Finals"
+];
+
+const QUALIFIER_SUBPAGE_BLOCKLIST = [
+  "North_America",
+  "South_America",
+  "Western_Europe",
+  "Eastern_Europe",
+  "Southeast_Asia",
+  "China",
+  "Europe",
+  "Americas",
+  "Asia",
+  "Oceania",
+  "MENA"
+];
+
+function extractSubPages(wikitext: string, html: string, pageUrl: string): string[] {
   const $ = cheerio.load(html);
   const subPages: string[] = [];
-  
-  // Look for Tabs (standard Liquipedia structure for multi-page tournaments)
-  $(".tabs-static a, .nav-tabs a").each((_, el) => {
-    const href = $(el).attr("href");
-    if (href && !href.startsWith("#") && !href.includes("action=edit")) {
-      const fullUrl = href.startsWith("http") ? href : `https://liquipedia.net${href}`;
-      if (fullUrl.startsWith(pageUrl) && fullUrl !== pageUrl && !fullUrl.includes("/Qualifier")) {
-        subPages.push(fullUrl);
-      }
+  const baseUrl = pageUrl.replace(/\/+$/, "");
+  const basePath = new URL(baseUrl).pathname.replace(/\/+$/, "");
+
+  const pushIfRelevant = (href: string | undefined | null) => {
+    if (!href || href.startsWith("#") || href.includes("action=edit")) return;
+
+    const fullUrl = href.startsWith("http") ? href : `https://liquipedia.net${href.startsWith("/") ? href : `/${href}`}`;
+    let parsed: URL;
+    try {
+      parsed = new URL(fullUrl);
+    } catch {
+      return;
     }
+
+    const path = parsed.pathname.replace(/\/+$/, "");
+    if (!path.startsWith(`${basePath}/`)) return;
+
+    const suffix = decodeURIComponent(path.slice(basePath.length + 1)).replace(/ /g, "_");
+    if (!suffix || suffix.includes("/") || suffix.includes("Qualifier")) return;
+    if (QUALIFIER_SUBPAGE_BLOCKLIST.includes(suffix)) return;
+    if (!EVENT_SUBPAGE_ALLOWLIST.includes(suffix)) return;
+
+    subPages.push(`${parsed.origin}${path}`);
+  };
+  
+  // Look for tabs, but avoid qualification region pages. Those pages are expensive
+  // to parse and do not belong to the selected main event schedule.
+  $(".tabs-static a, .nav-tabs a").each((_, el) => {
+    pushIfRelevant($(el).attr("href"));
   });
+
+  // Some pages mention event subpages only in wikitext links.
+  const wikiLinkRegex = /\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|[^\]]*)?\]\]/g;
+  let wikiMatch: RegExpExecArray | null;
+  while ((wikiMatch = wikiLinkRegex.exec(wikitext))) {
+    const rawTitle = wikiMatch[1].trim().replace(/ /g, "_");
+    const rawBase = decodeURIComponent(basePath.split("/").slice(2).join("/")).replace(/ /g, "_");
+    if (rawTitle.startsWith(`${rawBase}/`)) {
+      pushIfRelevant(`/dota2/${rawTitle}`);
+    }
+  }
 
   return Array.from(new Set(subPages));
 }

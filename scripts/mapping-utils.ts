@@ -1,4 +1,4 @@
-import * as xlsx from 'xlsx';
+import { readSheet } from 'read-excel-file/node';
 import { PrismaClient } from '@prisma/client';
 import { normalizeTeamName } from '../src/lib/teams';
 import levenshtein from 'fast-levenshtein';
@@ -30,16 +30,12 @@ export async function processAdminTeamsImport(filePath: string, disciplineSlug: 
   }
 
   console.log(`Reading file: ${filePath}`);
-  const workbook = xlsx.readFile(filePath);
-  const firstSheetName = workbook.SheetNames[0];
-  const worksheet = workbook.Sheets[firstSheetName];
-  
-  const data: any[][] = xlsx.utils.sheet_to_json(worksheet, { header: 1 });
+  const data = await readSheet(filePath);
   if (data.length < 2) {
     throw new Error('File has no data');
   }
   
-  const headers = data[0].map(String);
+  const headers = data[0].map((cell) => String(cell ?? ''));
   const { idCol, nameCol } = findColumns(headers);
   
   if (idCol === -1 || nameCol === -1) {

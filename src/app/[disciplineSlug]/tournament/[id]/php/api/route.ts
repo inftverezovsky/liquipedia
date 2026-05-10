@@ -2,8 +2,8 @@ import { buildFixtPayload } from "@/lib/adminUpload/buildFixtPayload";
 import { toPhpString } from "@/lib/adminUpload/utils";
 import { prisma } from "@/lib/db";
 
-export async function GET(request: Request, { params }: { params: { disciplineSlug: string; id: string } }) {
-  const { disciplineSlug, id } = params;
+export async function GET(request: Request, { params }: { params: Promise<{ disciplineSlug: string; id: string }> }) {
+  const { disciplineSlug, id } = await params;
   const { searchParams } = new URL(request.url);
   const idsParam = searchParams.get("ids");
   const selectedIds = idsParam ? idsParam.split(",") : undefined;

@@ -1,7 +1,9 @@
 "use client";
 
-import { useState } from "react";
-import { generateInternalTeamId } from "@/lib/teams";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { dispatchTeamMappingsUpdated } from "@/lib/clientEvents";
+import { getTeamMappingLookupKeys } from "@/lib/teams/canonicalize";
 
 type TeamMappingRecord = {
   id: string;
@@ -17,6 +19,17 @@ type TeamMappingRecord = {
   isLockedFromAutoMapping: boolean;
 };
 
+type MappingNotice = {
+  type: "error" | "info" | "success";
+  text: string;
+};
+
+type PendingMappingAction =
+  | { type: "save"; name: string }
+  | { type: "delete"; name: string; confirmed?: boolean }
+  | { type: "autoSingle"; name: string }
+  | { type: "autoAll"; confirmed?: boolean };
+
 export default function TeamMappingPanel({
   teamNames,
   initialMappings,
@@ -26,28 +39,81 @@ export default function TeamMappingPanel({
   initialMappings: TeamMappingRecord[];
   disciplineSlug: string;
 }) {
-  const [mappings, setMappings] = useState<Record<string, Partial<TeamMappingRecord> & { saved: boolean }>>(() => {
-    const map: Record<string, Partial<TeamMappingRecord> & { saved: boolean }> = {};
-    for (const name of teamNames) {
-      const existing = initialMappings.find((m) => m.liquipediaName === name);
-      map[name] = {
-        ...existing,
-        saved: !!existing?.platformId || existing?.status === 'manual_unmapped'
-      };
-    }
-    return map;
-  });
+  const router = useRouter();
+  const [mappings, setMappings] = useState<Record<string, Partial<TeamMappingRecord> & { saved: boolean }>>(
+    () => buildMappingState(teamNames, initialMappings)
+  );
 
   const [saving, setSaving] = useState<string | null>(null);
   const [globalLoading, setGlobalLoading] = useState(false);
+  const [notice, setNotice] = useState<MappingNotice | null>(null);
+  const [authRequired, setAuthRequired] = useState(false);
+  const [adminPassword, setAdminPassword] = useState("");
+  const [authLoading, setAuthLoading] = useState(false);
+  const [pendingAction, setPendingAction] = useState<PendingMappingAction | null>(null);
+
+  useEffect(() => {
+    setMappings(buildMappingState(teamNames, initialMappings));
+  }, [teamNames, initialMappings]);
+
+  async function runPendingAction(action: PendingMappingAction) {
+    if (action.type === "save") return handleSave(action.name);
+    if (action.type === "delete") return handleDelete(action.name, action.confirmed);
+    if (action.type === "autoSingle") return handleAutoMapSingle(action.name);
+    return handleAutoMapAll(action.confirmed);
+  }
+
+  function requireLogin(action: PendingMappingAction) {
+    setPendingAction(action);
+    setAuthRequired(true);
+    setNotice({
+      type: "error",
+      text: "Сессия администратора истекла или открыта с другого адреса. Введите пароль и действие повторится автоматически.",
+    });
+  }
+
+  async function handleAdminLogin() {
+    setAuthLoading(true);
+    setNotice(null);
+
+    try {
+      const response = await fetch("/api/admin-auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ password: adminPassword }),
+      });
+
+      if (!response.ok) {
+        setNotice({ type: "error", text: "Неверный административный пароль." });
+        return;
+      }
+
+      setAdminPassword("");
+      setAuthRequired(false);
+      const action = pendingAction;
+      setPendingAction(null);
+      setNotice({ type: "success", text: "Доступ подтверждён. Повторяю действие..." });
+
+      if (action) {
+        await runPendingAction(action);
+      }
+    } catch {
+      setNotice({ type: "error", text: "Не удалось выполнить вход администратора." });
+    } finally {
+      setAuthLoading(false);
+    }
+  }
 
   async function handleSave(name: string) {
     setSaving(name);
+    setNotice(null);
     try {
       const entry = mappings[name];
       const res = await fetch("/api/team-mapping", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
         body: JSON.stringify({
           liquipediaName: name,
           disciplineSlug,
@@ -60,24 +126,46 @@ export default function TeamMappingPanel({
         })
       });
       const data = await res.json();
+      if (res.status === 401) {
+        requireLogin({ type: "save", name });
+        return;
+      }
+      if (!res.ok) {
+        setNotice({ type: "error", text: data.error || "Ошибка сохранения маппинга" });
+        return;
+      }
       setMappings((prev) => ({
         ...prev,
         [name]: { ...data.mapping, saved: true }
       }));
-    } catch (err) {
-      console.error(err);
+      setNotice({ type: "success", text: `ID для ${name} сохранён.` });
+      dispatchTeamMappingsUpdated({ disciplineSlug });
+      router.refresh();
+    } catch {
+      setNotice({ type: "error", text: "Сетевая ошибка при сохранении маппинга." });
     } finally {
       setSaving(null);
     }
   }
 
-  async function handleDelete(name: string) {
-    if (!confirm(`Удалить маппинг для "${name}"?`)) return;
+  async function handleDelete(name: string, confirmed = false) {
+    if (!confirmed && !confirm(`Удалить маппинг для "${name}"?`)) return;
     setSaving(name);
+    setNotice(null);
     try {
-      await fetch(`/api/team-mapping?name=${encodeURIComponent(name)}&discipline=${disciplineSlug}`, {
-        method: "DELETE"
+      const res = await fetch(`/api/team-mapping?name=${encodeURIComponent(name)}&discipline=${disciplineSlug}`, {
+        method: "DELETE",
+        credentials: "same-origin"
       });
+      const data = await res.json();
+      if (res.status === 401) {
+        requireLogin({ type: "delete", name, confirmed: true });
+        return;
+      }
+      if (!res.ok) {
+        setNotice({ type: "error", text: data.error || "Ошибка удаления маппинга" });
+        return;
+      }
       setMappings((prev) => ({
         ...prev,
         [name]: { 
@@ -91,8 +179,11 @@ export default function TeamMappingPanel({
           saved: false 
         }
       }));
-    } catch (err) {
-      console.error(err);
+      setNotice({ type: "success", text: `Маппинг для ${name} очищен.` });
+      dispatchTeamMappingsUpdated({ disciplineSlug });
+      router.refresh();
+    } catch {
+      setNotice({ type: "error", text: "Сетевая ошибка при удалении маппинга." });
     } finally {
       setSaving(null);
     }
@@ -100,38 +191,66 @@ export default function TeamMappingPanel({
 
   async function handleAutoMapSingle(name: string) {
     setSaving(name);
+    setNotice(null);
     try {
       const res = await fetch("/api/team-mapping/auto", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
         body: JSON.stringify({ disciplineSlug, liquipediaName: name })
       });
       const data = await res.json();
+      if (res.status === 401) {
+        requireLogin({ type: "autoSingle", name });
+        return;
+      }
+      if (!res.ok) {
+        setNotice({ type: "error", text: data.error || "Ошибка авто-маппинга" });
+        return;
+      }
       if (data.mapping) {
         setMappings((prev) => ({
           ...prev,
           [name]: { ...data.mapping, saved: true }
         }));
+        setNotice({ type: "success", text: `Авто-маппинг для ${name} выполнен.` });
+        dispatchTeamMappingsUpdated({ disciplineSlug });
+        router.refresh();
+      } else {
+        setNotice({ type: "info", text: `Авто-маппинг не нашёл ID для ${name}.` });
       }
-    } catch (err) {
-      console.error(err);
+    } catch {
+      setNotice({ type: "error", text: "Сетевая ошибка при авто-маппинге." });
     } finally {
       setSaving(null);
     }
   }
 
-  async function handleAutoMapAll() {
-    if (!confirm(`Запустить авто-маппинг для всех неразмеченных команд ${disciplineSlug}?`)) return;
+  async function handleAutoMapAll(confirmed = false) {
+    if (!confirmed && !confirm(`Запустить авто-маппинг для всех неразмеченных команд ${disciplineSlug}?`)) return;
     setGlobalLoading(true);
+    setNotice(null);
     try {
-      await fetch("/api/team-mapping/auto", {
+      const res = await fetch("/api/team-mapping/auto", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
         body: JSON.stringify({ disciplineSlug })
       });
-      window.location.reload();
-    } catch (err) {
-      console.error(err);
+      const data = await res.json();
+      if (res.status === 401) {
+        requireLogin({ type: "autoAll", confirmed: true });
+        return;
+      }
+      if (!res.ok) {
+        setNotice({ type: "error", text: data.error || "Ошибка авто-маппинга" });
+        return;
+      }
+      setNotice({ type: "success", text: "Авто-маппинг всех команд выполнен." });
+      dispatchTeamMappingsUpdated({ disciplineSlug });
+      router.refresh();
+    } catch {
+      setNotice({ type: "error", text: "Сетевая ошибка при авто-маппинге." });
     } finally {
       setGlobalLoading(false);
     }
@@ -148,13 +267,48 @@ export default function TeamMappingPanel({
 
   return (
     <div className="flex flex-col gap-6">
+      {(notice || authRequired) && (
+        <div
+          className={`rounded-2xl border p-4 ${
+            notice?.type === "success"
+              ? "border-emerald-100 bg-emerald-50 text-emerald-700"
+              : notice?.type === "info"
+                ? "border-sky-100 bg-sky-50 text-sky-700"
+                : "border-rose-100 bg-rose-50 text-rose-700"
+          }`}
+        >
+          {notice && <p className="text-sm font-bold">{notice.text}</p>}
+
+          {authRequired && (
+            <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+              <input
+                type="password"
+                value={adminPassword}
+                onChange={(event) => setAdminPassword(event.target.value)}
+                onKeyDown={(event) => event.key === "Enter" && handleAdminLogin()}
+                placeholder="Административный пароль"
+                className="min-w-0 flex-1 rounded-xl border border-rose-200 bg-white px-4 py-2 text-sm font-bold text-slate-900 outline-none focus:border-rose-400"
+              />
+              <button
+                type="button"
+                onClick={handleAdminLogin}
+                disabled={authLoading || adminPassword.trim().length === 0}
+                className="rounded-xl bg-slate-950 px-5 py-2 text-xs font-black uppercase tracking-widest text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {authLoading ? "Проверка..." : "Войти и повторить"}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="flex items-center justify-between rounded-2xl bg-slate-50 border border-slate-200 p-6">
         <div>
           <h3 className="text-lg font-bold text-slate-900">Синхронизация команд</h3>
           <p className="text-sm font-medium text-slate-500">Настройте соответствие имен TCyber вашим внутренним Platform ID.</p>
         </div>
         <button
-          onClick={handleAutoMapAll}
+          onClick={() => handleAutoMapAll()}
           disabled={globalLoading}
           className="rounded-xl px-6 py-2.5 bg-slate-500/5 backdrop-blur-sm text-slate-600 font-medium text-xs uppercase tracking-widest border border-slate-200/50 hover:bg-slate-500/10 transition-all disabled:opacity-50"
         >
@@ -270,4 +424,30 @@ export default function TeamMappingPanel({
       </div>
     </div>
   );
+}
+
+function buildMappingState(teamNames: string[], initialMappings: TeamMappingRecord[]) {
+  const map: Record<string, Partial<TeamMappingRecord> & { saved: boolean }> = {};
+  const mappingLookup = new Map<string, TeamMappingRecord>();
+
+  for (const mapping of initialMappings) {
+    mappingLookup.set(mapping.liquipediaName.toLowerCase(), mapping);
+  }
+
+  for (const mapping of initialMappings) {
+    for (const key of getTeamMappingLookupKeys(mapping)) {
+      if (key && !mappingLookup.has(key.toLowerCase())) {
+        mappingLookup.set(key.toLowerCase(), mapping);
+      }
+    }
+  }
+
+  for (const name of teamNames) {
+    const existing = mappingLookup.get(name.toLowerCase());
+    map[name] = {
+      ...existing,
+      saved: !!existing?.platformId || existing?.status === 'manual_unmapped'
+    };
+  }
+  return map;
 }

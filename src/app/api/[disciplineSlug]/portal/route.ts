@@ -5,9 +5,10 @@ import { isPlaceholderTeam } from "@/lib/teams";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(request: Request, { params }: { params: { disciplineSlug: string } }) {
+export async function GET(request: Request, { params }: { params: Promise<{ disciplineSlug: string }> }) {
   const start = Date.now();
-  const slug = params.disciplineSlug;
+  const { disciplineSlug } = await params;
+  const slug = disciplineSlug;
   
   try {
     const { searchParams } = new URL(request.url);

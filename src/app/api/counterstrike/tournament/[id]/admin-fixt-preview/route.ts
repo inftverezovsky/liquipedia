@@ -2,11 +2,16 @@ import { NextResponse } from 'next/server';
 import { buildFixtPayload } from '@/lib/adminUpload/buildFixtPayload';
 import { phpSerialize } from '@/lib/adminUpload/phpSerialize';
 import { prisma } from '@/lib/db';
+import { requireAdmin } from '@/lib/adminAuth';
 
 export async function POST(
   request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await params;
+  const unauthorized = await requireAdmin(request);
+  if (unauthorized) return unauthorized;
+
   try {
     const { disciplineSlug, selectedMatchIds } = await request.json();
     
@@ -16,7 +21,7 @@ export async function POST(
     });
 
     // 2. Build payload
-    const buildResult = await buildFixtPayload(params.id, "counterstrike", selectedMatchIds);
+    const buildResult = await buildFixtPayload(id, "counterstrike", selectedMatchIds);
     
     let serialized = '';
     let postBody = '';

@@ -2,6 +2,8 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { detectTournamentSource, type TournamentSource } from "@/lib/tournamentSource";
+import { dispatchTournamentDataUpdated } from "@/lib/clientEvents";
 
 export default function LoadTournamentButton({
   pageId,
@@ -9,7 +11,8 @@ export default function LoadTournamentButton({
   pageUrl,
   disciplineSlug,
   initialTournamentId,
-  force = false
+  force = false,
+  source
 }: {
   pageId?: number | null;
   title: string;
@@ -17,6 +20,7 @@ export default function LoadTournamentButton({
   disciplineSlug: string;
   initialTournamentId?: string;
   force?: boolean;
+  source?: TournamentSource;
 }) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
@@ -32,10 +36,11 @@ export default function LoadTournamentButton({
     setError(null);
 
     try {
+      const resolvedSource = source ?? detectTournamentSource(pageUrl);
       const response = await fetch(`/api/${disciplineSlug}/import-tournament`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pageId, title, pageUrl, force: true })
+        body: JSON.stringify({ pageId, title, pageUrl, force: true, source: resolvedSource })
       });
 
       const data = (await response.json()) as { tournament?: { id: string }; error?: string };
@@ -46,6 +51,7 @@ export default function LoadTournamentButton({
 
       router.push(`/${disciplineSlug}/tournament/${data.tournament.id}`);
       router.refresh();
+      dispatchTournamentDataUpdated({ tournamentId: data.tournament.id, disciplineSlug });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Неизвестная ошибка");
     } finally {

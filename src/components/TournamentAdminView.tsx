@@ -1,13 +1,17 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import MatchList from "@/components/MatchList";
 import AdminUploadPanel from "@/components/AdminUploadPanel";
 import ExportPanel from "@/components/ExportPanel";
-import { motion } from "framer-motion";
 import useSWR from 'swr';
 import { fetcher } from '@/lib/fetcher';
-import { CalendarDays, ShieldCheck, Zap } from "lucide-react";
+import {
+  ADMIN_MAPPING_UPDATED_EVENT,
+  TEAM_MAPPINGS_UPDATED_EVENT,
+  TOURNAMENT_DATA_UPDATED_EVENT,
+} from "@/lib/clientEvents";
+import { CalendarDays } from "lucide-react";
 
 interface Props {
   tournament: any;
@@ -17,25 +21,57 @@ interface Props {
 
 export default function TournamentAdminView({ tournament: initialTournament, mappingMap, disciplineSlug }: Props) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const selectedMatchIds = useMemo(() => Array.from(selectedIds), [selectedIds]);
 
   // SWR for caching (SAFE: Only hits local DB, not Liquipedia)
   const { data: tournament, mutate } = useSWR(
-    `/api/${disciplineSlug}/tournament/${initialTournament.id}`,
+    `/api/${disciplineSlug}/tournament/${initialTournament.id}/data`,
     fetcher,
     { 
       fallbackData: initialTournament, 
-      refreshInterval: 60000, // Refresh from local DB every minute
-      revalidateOnFocus: true,
-      revalidateOnReconnect: true
+      refreshInterval: 0,
+      revalidateOnFocus: false,
+      revalidateOnReconnect: false
     }
   );
 
+  const normalizedMatches = useMemo(
+    () => tournament.matches?.map((m: any) => ({
+      ...m,
+      lpNumericalId: m.lpNumericalId ? m.lpNumericalId.toString() : null
+    })) || [],
+    [tournament.matches]
+  );
+
+  useEffect(() => {
+    mutate(initialTournament, { revalidate: false });
+  }, [initialTournament, mutate]);
+
+  useEffect(() => {
+    const handleRefresh = (event: Event) => {
+      const detail = (event as CustomEvent<{ tournamentId?: string; disciplineSlug?: string }>).detail;
+      if (detail?.disciplineSlug && detail.disciplineSlug !== disciplineSlug) return;
+      if (detail?.tournamentId && detail.tournamentId !== initialTournament.id) return;
+
+      mutate();
+      if (event.type === TOURNAMENT_DATA_UPDATED_EVENT) {
+        setSelectedIds(new Set());
+      }
+    };
+
+    window.addEventListener(TOURNAMENT_DATA_UPDATED_EVENT, handleRefresh);
+    window.addEventListener(TEAM_MAPPINGS_UPDATED_EVENT, handleRefresh);
+    window.addEventListener(ADMIN_MAPPING_UPDATED_EVENT, handleRefresh);
+
+    return () => {
+      window.removeEventListener(TOURNAMENT_DATA_UPDATED_EVENT, handleRefresh);
+      window.removeEventListener(TEAM_MAPPINGS_UPDATED_EVENT, handleRefresh);
+      window.removeEventListener(ADMIN_MAPPING_UPDATED_EVENT, handleRefresh);
+    };
+  }, [disciplineSlug, initialTournament.id, mutate]);
+
   return (
-    <motion.div 
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="grid gap-8 lg:grid-cols-[1fr_360px]"
-    >
+    <div className="grid gap-8 lg:grid-cols-[1fr_360px] animate-in">
       <div className="space-y-8">
         {/* Matches section */}
         <section className="premium-card p-6">
@@ -49,10 +85,7 @@ export default function TournamentAdminView({ tournament: initialTournament, map
             </div>
           </div>
           <MatchList 
-            matches={tournament.matches?.map((m: any) => ({
-              ...m,
-              lpNumericalId: m.lpNumericalId ? m.lpNumericalId.toString() : null
-            })) || []} 
+            matches={normalizedMatches} 
             mappings={mappingMap} 
             disciplineSlug={disciplineSlug} 
             selectedIds={selectedIds}
@@ -63,31 +96,23 @@ export default function TournamentAdminView({ tournament: initialTournament, map
       </div>
 
       <div className="space-y-8">
-        <motion.div
-          initial={{ opacity: 0, x: 20 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ delay: 0.1 }}
-        >
+        <div>
           <AdminUploadPanel 
             tournamentId={tournament.id} 
             disciplineSlug={disciplineSlug} 
             tournamentName={tournament.name} 
-            selectedMatchIds={Array.from(selectedIds)}
+            selectedMatchIds={selectedMatchIds}
           />
-        </motion.div>
+        </div>
 
-        <motion.div
-          initial={{ opacity: 0, x: 20 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ delay: 0.2 }}
-        >
+        <div>
           <ExportPanel 
             tournamentId={tournament.id} 
             disciplineSlug={disciplineSlug} 
-            selectedMatchIds={Array.from(selectedIds)}
+            selectedMatchIds={selectedMatchIds}
           />
-        </motion.div>
+        </div>
       </div>
-    </motion.div>
+    </div>
   );
 }

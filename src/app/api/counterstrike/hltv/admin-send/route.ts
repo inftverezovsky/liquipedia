@@ -3,8 +3,12 @@ import { phpSerialize } from '@/lib/adminUpload/phpSerialize';
 import { resolveAdminSettings } from '@/lib/adminUpload/resolveAdminSettings';
 import { sendFixtPayload } from '@/lib/adminUpload/sendFixtPayload';
 import { prisma } from '@/lib/db';
+import { requireAdmin } from '@/lib/adminAuth';
 
 export async function POST(request: Request) {
+  const unauthorized = await requireAdmin(request);
+  if (unauthorized) return unauthorized;
+
   try {
     const { payload } = await request.json();
     
@@ -21,6 +25,25 @@ export async function POST(request: Request) {
 
     // 2. Serialize
     const serialized = phpSerialize(payload);
+
+    const existingSuccessfulSend = await prisma.adminUploadLog.findFirst({
+      where: {
+        disciplineSlug: 'counterstrike',
+        tournamentId: 'hltv-manual',
+        serializedFixt: serialized,
+        status: { in: ['success', 'success_like'] },
+      },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, createdAt: true, status: true },
+    });
+
+    if (existingSuccessfulSend) {
+      return NextResponse.json({
+        ok: false,
+        error: "This payload was already sent successfully.",
+        previousSend: existingSuccessfulSend,
+      }, { status: 409 });
+    }
 
     // 3. Send
     const sendResult = await sendFixtPayload(

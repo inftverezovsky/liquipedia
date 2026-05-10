@@ -2,14 +2,19 @@ import { NextResponse } from 'next/server';
 import { buildFixtPayload } from '@/lib/adminUpload/buildFixtPayload';
 import { phpSerialize } from '@/lib/adminUpload/phpSerialize';
 import { prisma } from '@/lib/db';
+import { requireAdmin } from '@/lib/adminAuth';
 
 export async function POST(
   request: Request,
-  { params }: { params: { id: string, disciplineSlug: string } }
+  { params }: { params: Promise<{ id: string; disciplineSlug: string }> }
 ) {
+  const { disciplineSlug: routeDisciplineSlug, id } = await params;
+  const unauthorized = await requireAdmin(request);
+  if (unauthorized) return unauthorized;
+
   try {
     const body = await request.json();
-    const disciplineSlug = body.disciplineSlug || params.disciplineSlug;
+    const disciplineSlug = body.disciplineSlug || routeDisciplineSlug;
     const selectedMatchIds = body.selectedMatchIds;
     
     // 1. Get settings
@@ -22,7 +27,7 @@ export async function POST(
     }
 
     // 2. Build payload
-    const buildResult = await buildFixtPayload(params.id, disciplineSlug, selectedMatchIds);
+    const buildResult = await buildFixtPayload(id, disciplineSlug, selectedMatchIds);
     
     let serialized = '';
     let postBody = '';

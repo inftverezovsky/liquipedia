@@ -31,6 +31,9 @@ export function isPlaceholderTeam(name: string | null | undefined): boolean {
   
   // Basic placeholders
   if (["tbd", "tba", "slot", "seed", "qualified team", "unknown", "placeholder"].includes(n)) return true;
+
+  // Real Counter-Strike org. This conflicts with Liquipedia seed labels like A1/B2/G2.
+  if (n === "g2") return false;
   
   // Bracket seeds (A1, B2, C12, etc.) - expanded range
   if (/^[a-h][1-9][0-9]?$/i.test(n)) return true;

@@ -15,8 +15,11 @@ docker-compose.yml
 Dockerfile
 .dockerignore
 scratch/
-*.ts
-*.js
-!next.config.mjs
-!postcss.config.js
-!tailwind.config.ts
+cache/
+User/
+test-results/
+playwright-report/
+blob-report/
+*.tsbuildinfo
+hltv_debug_error.png
+*.log

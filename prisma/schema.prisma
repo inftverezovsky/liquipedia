@@ -85,15 +85,23 @@ model RawSnapshot {
   tournamentImportId String
   tournamentImport   TournamentImport @relation(fields: [tournamentImportId], references: [id], onDelete: Cascade)
   source             String
+  disciplineSlug     String?
   pageId             Int?
   pageTitle          String
+  contentHash        String?
+  revisionId         Int?
+  revisionTimestamp  DateTime?
   rawJson            Json
   rawWikitext        String?          @db.Text
   rawHtml            String?          @db.Text
+  qualityScore       Float?
+  metadata           Json?
   fetchedAt          DateTime         @default(now())
 
+  @@index([disciplineSlug, pageTitle])
   @@index([pageTitle])
   @@index([fetchedAt])
+  @@index([contentHash])
 }
 
 model Tournament {
@@ -122,6 +130,7 @@ model Tournament {
   updatedAt        DateTime                @updatedAt
 
   @@unique([disciplineSlug, sourceTitle])
+  @@index([disciplineSlug])
   @@index([sourcePageId])
   @@index([name])
   @@index([sourceUrl])
@@ -167,6 +176,9 @@ model TournamentMatch {
   platformId    String?
   syncedAt      DateTime?
   rawText       String?    @db.Text
+  hasPlaceholderTeams Boolean @default(false)
+  sourceConfidence    Float?
+  sourceBreakdown     Json?
   createdAt     DateTime   @default(now())
 
   @@index([tournamentId])
@@ -174,9 +186,86 @@ model TournamentMatch {
   @@index([platformId])
 }
 
+model SourceFetchCache {
+  id                 String    @id @default(cuid())
+  source             String
+  disciplineSlug     String    @default("global")
+  resourceType       String
+  resourceKey        String
+  mode               String    @default("cache-first")
+  revisionId         Int?
+  revisionTimestamp  DateTime?
+  contentHash        String?
+  lastGoodAt         DateTime?
+  lastAttemptAt      DateTime?
+  lastErrorClass     String?
+  qualityScore       Float?
+  cacheUntil         DateTime?
+  staleUntil         DateTime?
+  externalRequests   Int       @default(0)
+  bytesIn            Int?
+  bytesOut           Int?
+  cacheLayer         String?
+  rawSnapshotId      String?
+  metadata           Json?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@unique([source, disciplineSlug, resourceType, resourceKey, mode])
+  @@index([source, disciplineSlug, resourceType])
+  @@index([cacheUntil])
+  @@index([staleUntil])
+  @@index([lastGoodAt])
+}
+
 model GlobalSettings {
   key   String @id
   value String @db.Text
+}
+
+model ProxyPool {
+  id            String   @id @default(cuid())
+  url           String   @unique
+  protocol      String   @default("http")
+  host          String
+  port          Int
+  username      String?
+  password      String?
+  isActive      Boolean  @default(true)
+  failCount     Int      @default(0)
+  lastError     String?  @db.Text
+  cooldownUntil DateTime?
+  successCount  Int      @default(0)
+  blockedCount  Int      @default(0)
+  avgLatencyMs  Int?
+  lastUsed      DateTime?
+  createdAt     DateTime @default(now())
+}
+
+model ParserRequestLog {
+  id             String   @id @default(cuid())
+  source         String
+  mode           String?
+  route          String?
+  disciplineSlug String?
+  queryHash      String?
+  proxyId        String?
+  attempt        Int?
+  statusCode     Int?
+  errorClass     String?
+  durationMs     Int?
+  bytesIn        Int?
+  bytesOut       Int?
+  cacheLayer     String?
+  cacheHit       Boolean  @default(false)
+  matchesCount   Int?
+  eventsCount    Int?
+  createdAt      DateTime @default(now())
+
+  @@index([source, mode, createdAt])
+  @@index([disciplineSlug, createdAt])
+  @@index([proxyId, createdAt])
+  @@index([cacheHit, createdAt])
 }
 
 enum MappingStatus {
@@ -223,6 +312,7 @@ model TeamMapping {
   @@unique([disciplineSlug, liquipediaName])
   @@index([liquipediaName])
   @@index([platformId])
+  @@index([alias])
 }
 
 model DisciplineAdminSettings {

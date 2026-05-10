@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { getTeamAliasKey, getTeamMappingLookupKeys } from "@/lib/teams/canonicalize";
+import { normalizeTeamName } from "@/lib/teams";
 
 export async function POST(req: Request) {
   try {
@@ -14,13 +16,22 @@ export async function POST(req: Request) {
       where: { disciplineSlug: "counterstrike" }
     });
 
-    const mappingMap = new Map(mappings.map(m => [m.liquipediaName.toLowerCase(), m]));
+    const mappingMap = new Map<string, (typeof mappings)[number]>();
+    for (const mapping of mappings) {
+      for (const key of getTeamMappingLookupKeys(mapping)) {
+        mappingMap.set(key.toLowerCase(), mapping);
+      }
+    }
 
     const findBestMatch = (name: string) => {
       if (!name) return null;
       const lowerName = name.toLowerCase();
+      const normalized = normalizeTeamName(name);
+      const aliasKey = getTeamAliasKey(name);
       // 1. Exact match
       if (mappingMap.has(lowerName)) return mappingMap.get(lowerName);
+      if (mappingMap.has(normalized)) return mappingMap.get(normalized);
+      if (mappingMap.has(aliasKey)) return mappingMap.get(aliasKey);
       
       // 2. Fuzzy match: check if database name is inside OCR name or vice versa
       // This helps with "EB Tricked" matching "Tricked"

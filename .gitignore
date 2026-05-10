@@ -3,6 +3,9 @@ node_modules
 out
 dist
 coverage
+test-results/
+playwright-report/
+blob-report/
 .env
 .env.local
 .env.development
@@ -18,6 +21,10 @@ yarn-error.log*
 # Scratch files
 scratch/
 .gemini/
+cache/
+User/
+hltv_debug_error.png
+*.tsbuildinfo
 
 # IDE files
 .vscode/

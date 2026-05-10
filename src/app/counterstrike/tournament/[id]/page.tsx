@@ -2,28 +2,26 @@ import { notFound } from "next/navigation";
 import LoadTournamentButton from "@/components/LoadTournamentButton";
 import StatusBadge from "@/components/StatusBadge";
 import TeamMappingPanel from "@/components/TeamMappingPanel";
-import ExportPanel from "@/components/ExportPanel";
 import TournamentAdminView from "@/components/TournamentAdminView";
 import { prisma } from "@/lib/db";
 
 import { formatDateTime } from "@/lib/format";
-import { isPlaceholderTeam } from "@/lib/teams";
+import { dedupeTournamentMatches } from "@/lib/matches/dedupe";
+import { getTeamMappingLookupKeys } from "@/lib/teams/canonicalize";
+import { collectTournamentTeamNames } from "@/lib/teams/tournamentTeamNames";
+import { detectTournamentSource, getTournamentSourceLabel } from "@/lib/tournamentSource";
 
 export const dynamic = "force-dynamic";
 
-export default async function TournamentPage({ params }: { params: { id: string } }) {
+export default async function TournamentPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   const tournament = await prisma.tournament.findUnique({
-    where: { id: params.id },
+    where: { id: id },
     include: {
       participants: { orderBy: { createdAt: "asc" } },
       matches: { orderBy: [{ matchDate: "asc" }, { createdAt: "asc" }] },
       lastImport: {
-        include: {
-          rawSnapshots: {
-            orderBy: { fetchedAt: "desc" },
-            take: 1
-          }
-        }
+        select: { finishedAt: true }
       }
     }
   });
@@ -32,35 +30,33 @@ export default async function TournamentPage({ params }: { params: { id: string 
     notFound();
   }
 
-  // Get team mappings
-  const teamNames = new Set<string>();
-  const isNumberedTbd = (name: string) => /^TBD\d+$/i.test(name);
+  const dedupedMatches = dedupeTournamentMatches(tournament.matches);
+  const tournamentForView = { ...tournament, matches: dedupedMatches };
 
-  for (const m of tournament.matches) {
-    if (m.teamAName && (!isPlaceholderTeam(m.teamAName) || isNumberedTbd(m.teamAName))) teamNames.add(m.teamAName);
-    if (m.teamBName && (!isPlaceholderTeam(m.teamBName) || isNumberedTbd(m.teamBName))) teamNames.add(m.teamBName);
-  }
-  for (const p of tournament.participants) {
-    if (p.name && (!isPlaceholderTeam(p.name) || isNumberedTbd(p.name))) teamNames.add(p.name);
-  }
-
+  const teamNames = collectTournamentTeamNames({
+    matches: dedupedMatches,
+    participants: tournament.participants,
+  });
   const mappings = await prisma.teamMapping.findMany({
-    where: { 
+    where: {
       disciplineSlug: "counterstrike",
-      liquipediaName: { in: [...teamNames] } 
+      liquipediaName: { in: teamNames }
     }
   });
 
   const mappingMap: Record<string, { alias: string | null; platformId: string | null; logoUrl: string | null }> = {};
   for (const m of mappings) {
-    mappingMap[m.liquipediaName] = { 
+    const mapping = { 
       alias: m.alias, 
       platformId: m.platformId,
       logoUrl: m.logoUrl 
     };
+    for (const key of getTeamMappingLookupKeys(m)) {
+      mappingMap[key] = mapping;
+    }
   }
 
-  const rawSnapshot = tournament.lastImport?.rawSnapshots[0];
+  const source = detectTournamentSource(tournament.sourceUrl);
 
   return (
     <div className="space-y-6">
@@ -74,7 +70,7 @@ export default async function TournamentPage({ params }: { params: { id: string 
               <StatusBadge status={tournament.extractionStatus} />
               <div className="h-1 w-1 rounded-full bg-slate-300" />
               <a href={tournament.sourceUrl} target="_blank" rel="noreferrer" className="text-sm font-semibold text-slate-600 hover:text-slate-950 transition underline underline-offset-4 decoration-slate-200 hover:decoration-slate-950">
-                Liquipedia Source
+                {getTournamentSourceLabel(source)}
               </a>
               {tournament.lastImport?.finishedAt ? (
                 <>
@@ -92,13 +88,14 @@ export default async function TournamentPage({ params }: { params: { id: string 
               disciplineSlug="counterstrike" 
               initialTournamentId={tournament.id}
               force={true}
+              source={source}
             />
           </div>
         </div>
       </section>
 
       <TournamentAdminView 
-        tournament={tournament} 
+        tournament={tournamentForView} 
         mappingMap={mappingMap} 
         disciplineSlug="counterstrike" 
       />
@@ -116,19 +113,11 @@ export default async function TournamentPage({ params }: { params: { id: string 
             </div>
           </summary>
           <div className="mt-8 border-t border-slate-100 pt-8">
-            <TeamMappingPanel teamNames={[...teamNames]} initialMappings={mappings} disciplineSlug="counterstrike" />
+            <TeamMappingPanel teamNames={teamNames} initialMappings={mappings} disciplineSlug="counterstrike" />
           </div>
         </details>
       </section>
 
-      {/* Debug */}
-      <section className="rounded-3xl bg-slate-950 p-8 text-white">
-        <h2 className="text-lg font-bold mb-4">Техническая информация</h2>
-        <details className="rounded-2xl bg-white/5 border border-white/10 p-4">
-          <summary className="cursor-pointer text-sm font-bold text-slate-400 hover:text-white transition">Показать Raw Wikitext</summary>
-          <pre className="mt-6 max-h-[500px] overflow-auto text-[10px] leading-relaxed text-slate-400 font-mono scrollbar-hide">{rawSnapshot?.rawWikitext ?? "Нет данных"}</pre>
-        </details>
-      </section>
     </div>
   );
 }

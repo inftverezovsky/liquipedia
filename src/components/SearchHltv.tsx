@@ -2,6 +2,7 @@
 
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Loader2, Calendar, Trash2 } from "lucide-react";
 
 type HltvEvent = {
   id: string;
@@ -18,17 +19,16 @@ export default function SearchHltv({ disciplineSlug }: { disciplineSlug: string 
   const [importingId, setImportingId] = useState<string | null>(null);
   const router = useRouter();
 
-  async function onSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function runSearch(force = false) {
     setLoading(true);
     setError(null);
     setResults([]);
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 60000);
+    const timeoutId = setTimeout(() => controller.abort(), 180000); // 3 minutes for retries
 
     try {
-      const response = await fetch(`/api/${disciplineSlug}/search-hltv?query=${encodeURIComponent(query)}`, {
+      const response = await fetch(`/api/${disciplineSlug}/search-hltv?query=${encodeURIComponent(query)}${force ? "&force=true" : ""}`, {
         signal: controller.signal
       });
       clearTimeout(timeoutId);
@@ -48,6 +48,11 @@ export default function SearchHltv({ disciplineSlug }: { disciplineSlug: string 
     }
   }
 
+  async function onSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await runSearch(false);
+  }
+
   const handleImport = async (hltvEvent: HltvEvent) => {
     setImportingId(hltvEvent.id);
     try {
@@ -61,37 +66,50 @@ export default function SearchHltv({ disciplineSlug }: { disciplineSlug: string 
         })
       });
       
-      const data = await response.json();
+      const text = await response.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (e) {
+        throw new Error("Сервер вернул некорректный ответ. Возможно, запрос был заблокирован или произошла ошибка.");
+      }
+
       if (!response.ok) throw new Error(data.error ?? "Import failed");
       
       if (data.tournament?.id) {
         router.push(`/${disciplineSlug}/tournament/${data.tournament.id}`);
       }
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "Import error");
+    } catch (err: any) {
+      setError(err.message);
+      alert(err.message);
     } finally {
       setImportingId(null);
     }
   };
 
   return (
-    <section className="premium-card p-8 bg-white border-slate-200 shadow-sm">
-      <form onSubmit={onSubmit} className="space-y-6">
-        <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-900" htmlFor="hltv-query">
-          Интеллектуальный поиск по HLTV
-        </label>
-        <div className="flex flex-col gap-4 sm:flex-row">
+    <section className="premium-card min-h-[188px] border-slate-200 bg-white shadow-sm">
+      <form onSubmit={onSubmit} className="space-y-5">
+        <div className="flex items-center justify-between gap-3">
+          <label className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-950" htmlFor="hltv-query">
+            Поиск HLTV
+          </label>
+          <span className="rounded-full border border-orange-100 bg-orange-50 px-2.5 py-1 text-[9px] font-black uppercase tracking-widest text-orange-600">
+            HLTV
+          </span>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_112px]">
           <input
             id="hltv-query"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Введите название турнира на HLTV"
-            className="min-h-[56px] flex-1 rounded-2xl border border-slate-200 bg-white px-6 py-4 text-slate-950 font-bold outline-none transition focus:border-orange-600 focus:ring-4 focus:ring-orange-600/5 placeholder:text-slate-300"
+            placeholder="Название турнира"
+            className="min-h-[50px] rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-950 outline-none transition focus:border-orange-600 focus:ring-4 focus:ring-orange-600/5 placeholder:text-slate-300"
           />
           <button
             type="submit"
             disabled={loading || query.trim().length < 2}
-            className="flex items-center justify-center rounded-2xl bg-indigo-600 px-10 min-h-[56px] text-xs font-black uppercase tracking-widest text-white hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200 disabled:bg-slate-100 disabled:text-slate-400 disabled:shadow-none"
+            className="min-h-[50px] rounded-lg bg-slate-950 px-5 text-xs font-black uppercase tracking-widest text-white shadow-sm transition-colors hover:bg-orange-600 disabled:bg-slate-100 disabled:text-slate-400 disabled:shadow-none"
           >
             {loading ? "Поиск..." : "Найти"}
           </button>
@@ -104,38 +122,80 @@ export default function SearchHltv({ disciplineSlug }: { disciplineSlug: string 
         </div>
       )}
 
-      <div className="mt-10 space-y-4">
-        {results.length > 0 && (
-          <div className="flex items-center justify-between text-[10px] font-black uppercase tracking-widest text-slate-900 px-2">
-            <span>RESULTS: {results.length}</span>
-            <span className="flex items-center gap-2">
+      <div className="mt-8 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            {results.length > 0 && (
+              <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                Results: {results.length}
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={() => runSearch(true)}
+              disabled={loading || query.trim().length < 2}
+              className="flex h-8 items-center gap-1.5 rounded-lg border border-orange-100 bg-orange-50 px-3 text-[10px] font-black uppercase tracking-widest text-orange-600 transition-colors hover:bg-orange-100 disabled:opacity-40"
+              title="Обновить принудительно, минуя кеш"
+            >
+              <Loader2 className={`w-3 h-3 ${loading ? "animate-spin" : "hidden"}`} />
+              Обновить
+            </button>
+            <button
+              onClick={async () => {
+                if (confirm('Очистить кэш поиска? Это не затронет привязки команд.')) {
+                  const res = await fetch('/api/settings/clear-search-cache', { method: 'POST' });
+                  const data = await res.json();
+                  if (data.ok) {
+                    setResults([]);
+                    alert(`Кэш очищен (${data.deletedCount} файлов)`);
+                  }
+                }
+              }}
+              className="flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3 text-[10px] font-black uppercase tracking-widest text-slate-500 transition-colors hover:border-red-100 hover:bg-red-50 hover:text-red-600"
+              title="Очистить временный кэш поиска"
+            >
+              <Trash2 className="w-3 h-3" />
+              Очистить кеш поиска
+            </button>
+          </div>
+          {results.length > 0 && (
+            <span className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-slate-900">
                <span className="h-1.5 w-1.5 rounded-full bg-orange-600 shadow-[0_0_8px_rgba(249,115,22,0.5)]" />
                HLTV DATABASE
             </span>
-          </div>
-        )}
+          )}
+        </div>
 
         {results.map((result) => (
-          <article key={result.id} className="rounded-3xl border border-slate-100 bg-slate-50/50 p-8 transition-all hover:border-orange-200 hover:bg-white hover:shadow-xl group">
+          <article key={result.id} className="rounded-lg border border-slate-100 bg-slate-50/50 p-5 transition-colors hover:border-orange-200 hover:bg-white group">
             <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-3 mb-3">
-                   {result.dates && (
-                     <span className="inline-flex items-center rounded-lg bg-orange-50 px-2.5 py-1 text-[10px] font-black uppercase tracking-widest text-orange-600 border border-orange-100">
-                       {result.dates}
-                     </span>
-                   )}
+              <div className="flex flex-col gap-3 flex-1 min-w-0">
+                <h3 className="text-xl font-bold text-slate-900 leading-tight">
+                  {result.title}
+                </h3>
+                
+                {result.dates && (
+                  <div className="flex items-center gap-2 px-3 py-1 rounded-lg bg-slate-100 border border-slate-200 text-slate-600 w-fit whitespace-nowrap">
+                    <Calendar className="w-4 h-4" />
+                    <span className="text-xs font-bold uppercase tracking-wide">
+                      {result.dates}
+                    </span>
+                  </div>
+                )}
+
+                <a 
+                  href={result.url} 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="text-xs text-slate-400 hover:text-indigo-500 truncate transition-colors"
+                >
+                  {result.url}
+                </a>
+                <div className="mt-1 flex items-center gap-2">
                    <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest">
                      ID: {result.id}
                    </span>
                 </div>
-                
-                <h2 className="text-2xl font-black text-slate-950 transition-colors group-hover:text-orange-600 leading-tight">
-                  {result.title}
-                </h2>
-                <p className="mt-3 truncate text-[10px] font-black text-slate-400 uppercase tracking-tight">
-                  {result.url}
-                </p>
               </div>
               
               <div className="flex shrink-0 flex-wrap gap-3">

@@ -1,15 +1,18 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { matchesToCsv, participantsToCsv, tournamentToMarkdown } from "@/lib/exporters/tournament";
+import { dedupeTournamentMatches } from "@/lib/matches/dedupe";
 import { generateInternalTeamId, isPlaceholderTeam } from "@/lib/teams";
+import { getTeamMappingLookupKeys } from "@/lib/teams/canonicalize";
 
-export async function GET(request: Request, { params }: { params: { id: string } }) {
+export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   const { searchParams } = new URL(request.url);
   const format = searchParams.get("format") ?? "json";
   const type = searchParams.get("type") ?? "matches";
 
   const tournament = await prisma.tournament.findUnique({
-    where: { id: params.id },
+    where: { id: id },
     include: {
       participants: { orderBy: { createdAt: "asc" } },
       matches: { orderBy: [{ matchDate: "asc" }, { createdAt: "asc" }] }
@@ -21,17 +24,23 @@ export async function GET(request: Request, { params }: { params: { id: string }
   }
 
   const filenameBase = slugify(tournament.name);
+  const matchesForExport = dedupeTournamentMatches(tournament.matches);
 
   // Fetch mappings to enhance data
   const teamNames = new Set<string>();
-  tournament.matches.forEach(m => {
+  matchesForExport.forEach(m => {
     if (m.teamAName) teamNames.add(m.teamAName);
     if (m.teamBName) teamNames.add(m.teamBName);
   });
   const mappings = await prisma.teamMapping.findMany({
     where: { liquipediaName: { in: Array.from(teamNames) } }
   });
-  const mappingMap = new Map(mappings.map(m => [m.liquipediaName, m]));
+  const mappingMap = new Map<string, (typeof mappings)[number]>();
+  for (const mapping of mappings) {
+    for (const key of getTeamMappingLookupKeys(mapping)) {
+      if (!mappingMap.has(key)) mappingMap.set(key, mapping);
+    }
+  }
 
   const getTeamInfo = (name: string | null, side: 'A' | 'B') => {
     if (!name || isPlaceholderTeam(name)) {
@@ -43,7 +52,7 @@ export async function GET(request: Request, { params }: { params: { id: string }
         mappingConfidence: null
       };
     }
-    const m = mappingMap.get(name);
+    const m = mappingMap.get(name) || mappingMap.get(name.toLowerCase());
     
     // If mapped, platformId should be used.
     // If not mapped, platformId is null, and id becomes internalTeamId.
@@ -60,7 +69,7 @@ export async function GET(request: Request, { params }: { params: { id: string }
     };
   };
 
-  const formattedMatches = tournament.matches.map(m => {
+  const formattedMatches = matchesForExport.map(m => {
     const teamA = getTeamInfo(m.teamAName, 'A');
     const teamB = getTeamInfo(m.teamBName, 'B');
     return {
@@ -87,7 +96,7 @@ export async function GET(request: Request, { params }: { params: { id: string }
   if (format === "php") {
     const { buildFixtPayload } = await import("@/lib/adminUpload/buildFixtPayload");
     const { phpSerialize: serialize } = await import("@/lib/adminUpload/phpSerialize");
-    const { payload } = await buildFixtPayload(params.id, "dota2");
+    const { payload } = await buildFixtPayload(id, "dota2");
     
     if (!payload) {
       return NextResponse.json({ error: "Could not build PHP payload. Check if Shapka ID and Sport ID are set and team mappings exist." }, { status: 400 });

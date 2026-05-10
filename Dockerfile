@@ -1,11 +1,11 @@
 # Build stage
-FROM node:20 AS builder
+FROM node:24 AS builder
 
 WORKDIR /app
 
 # Install dependencies
 COPY package*.json ./
-RUN npm install
+RUN npm ci
 
 # Copy prisma schema and generate client
 COPY prisma ./prisma
@@ -18,7 +18,7 @@ COPY . .
 RUN npm run build
 
 # Runtime stage
-FROM node:20-slim AS runner
+FROM node:24-slim AS runner
 
 WORKDIR /app
 
@@ -35,8 +35,8 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/prisma ./prisma
 
-# Expose the port (Railway will use PORT env var, but this is a good default)
-EXPOSE 3000
+# Expose the local app port. Railway still injects PORT at runtime.
+EXPOSE 3010
 
 # Command to run on start
-CMD npx prisma db push && npx prisma db seed && npm run start
+CMD npm run db:migrate:deploy && npm run start

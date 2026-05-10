@@ -3,6 +3,7 @@
 import { FormEvent, useState } from "react";
 import LoadTournamentButton from "@/components/LoadTournamentButton";
 import UpcomingTournamentsWidget from "@/components/UpcomingTournamentsWidget";
+import { Loader2, Calendar, Trash2 } from "lucide-react";
 
 type SearchResult = {
   pageId: number;
@@ -14,27 +15,37 @@ type SearchResult = {
   dates?: string | null;
 };
 
+function toPlainSnippet(snippet: string) {
+  return snippet
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&quot;/g, '"')
+    .replace(/&#039;|&apos;/g, "'")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export default function SearchTournament({ disciplineSlug, hideSidebar = false }: { disciplineSlug: string, hideSidebar?: boolean }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
-  const [cacheHit, setCacheHit] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function onSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function runSearch(force = false) {
     setLoading(true);
     setError(null);
     setResults([]);
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 60000);
+    const timeoutId = setTimeout(() => controller.abort(), 180000); // 3 minutes for retries
 
     try {
       const response = await fetch(`/api/${disciplineSlug}/search-tournament`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query }),
+        body: JSON.stringify({ query, force }),
         signal: controller.signal
       });
       clearTimeout(timeoutId);
@@ -42,7 +53,6 @@ export default function SearchTournament({ disciplineSlug, hideSidebar = false }
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "Search failed");
       setResults(data.results ?? []);
-      setCacheHit(data.cacheHit);
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') {
         setError("Поиск занял слишком много времени. Попробуйте еще раз.");
@@ -55,24 +65,34 @@ export default function SearchTournament({ disciplineSlug, hideSidebar = false }
     }
   }
 
+  async function onSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await runSearch(false);
+  }
+
   const searchCard = (
-    <section className="premium-card p-8 bg-white border-slate-200 shadow-sm">
-      <form onSubmit={onSubmit} className="space-y-6">
-        <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-900" htmlFor="tournament-query">
-          Интеллектуальный поиск по Liquipedia
-        </label>
-        <div className="flex flex-col gap-4 sm:flex-row">
+    <section className="premium-card min-h-[188px] border-slate-200 bg-white shadow-sm">
+      <form onSubmit={onSubmit} className="space-y-5">
+        <div className="flex items-center justify-between gap-3">
+          <label className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-950" htmlFor="tournament-query">
+            Поиск Liquipedia
+          </label>
+          <span className="rounded-full border border-indigo-100 bg-indigo-50 px-2.5 py-1 text-[9px] font-black uppercase tracking-widest text-indigo-600">
+            Wiki
+          </span>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_112px]">
           <input
             id="tournament-query"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Введите название турнира (напр. Riyadh Masters)"
-            className="min-h-[56px] flex-1 rounded-2xl border border-slate-200 bg-white px-6 py-4 text-slate-950 font-bold outline-none transition focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/5 placeholder:text-slate-300"
+            placeholder="Название турнира"
+            className="min-h-[50px] rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-950 outline-none transition focus:border-indigo-600 focus:ring-4 focus:ring-indigo-600/5 placeholder:text-slate-300"
           />
           <button
             type="submit"
             disabled={loading || query.trim().length < 2}
-            className="btn-primary min-h-[56px] px-10 text-xs disabled:bg-slate-100 disabled:text-slate-400"
+            className="min-h-[50px] rounded-lg bg-slate-950 px-5 text-xs font-black uppercase tracking-widest text-white shadow-sm transition-colors hover:bg-indigo-600 disabled:bg-slate-100 disabled:text-slate-400 disabled:shadow-none"
           >
             {loading ? "Поиск..." : "Найти"}
           </button>
@@ -85,32 +105,79 @@ export default function SearchTournament({ disciplineSlug, hideSidebar = false }
         </div>
       )}
 
-      <div className="mt-10 space-y-4">
-        {results.length > 0 && (
-          <div className="flex items-center justify-between text-[10px] font-black uppercase tracking-widest text-slate-900 px-2">
-            <span>Results: {results.length}</span>
-            <span className="flex items-center gap-2">
-               <span className={`h-1.5 w-1.5 rounded-full ${cacheHit ? 'bg-indigo-600 shadow-[0_0_8px_rgba(79,70,229,0.5)]' : 'bg-slate-400'}`} />
-               {cacheHit ? "Cached result" : "Live search"}
-            </span>
+      <div className="mt-8 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            {results.length > 0 && (
+              <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                Results: {results.length}
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={() => runSearch(true)}
+              disabled={loading || query.trim().length < 2}
+              className="flex h-8 items-center gap-1.5 rounded-lg border border-indigo-100 bg-indigo-50 px-3 text-[10px] font-black uppercase tracking-widest text-indigo-600 transition-colors hover:bg-indigo-100 disabled:opacity-40"
+              title="Обновить принудительно, минуя кеш"
+            >
+              <Loader2 className={`w-3 h-3 ${loading ? "animate-spin" : "hidden"}`} />
+              Обновить
+            </button>
+            <button
+              onClick={async () => {
+                if (confirm('Очистить кэш поиска? Это не затронет привязки команд.')) {
+                  const res = await fetch('/api/settings/clear-search-cache', { method: 'POST' });
+                  const data = await res.json();
+                  if (data.ok) {
+                    setResults([]);
+                    alert(`Кэш очищен (${data.deletedCount} файлов)`);
+                  }
+                }
+              }}
+              className="flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3 text-[10px] font-black uppercase tracking-widest text-slate-500 transition-colors hover:border-red-100 hover:bg-red-50 hover:text-red-600"
+              title="Очистить временный кэш поиска"
+            >
+              <Trash2 className="w-3 h-3" />
+              Очистить кеш поиска
+            </button>
           </div>
-        )}
+          {results.length > 0 && (
+            <span className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-indigo-600">
+               <span className="h-1.5 w-1.5 rounded-full bg-indigo-600 shadow-[0_0_8px_rgba(79,70,229,0.5)]" />
+               LIQUIPEDIA WIKI
+            </span>
+          )}
+        </div>
 
         {results.map((result) => (
-          <article key={`${result.pageId}-${result.title}`} className="rounded-3xl border border-slate-100 bg-slate-50/50 p-6 transition-all hover:border-indigo-200 hover:bg-white hover:shadow-md">
+          <article key={`${result.pageId}-${result.title}`} className="rounded-lg border border-slate-100 bg-slate-50/50 p-5 transition-colors hover:border-indigo-200 hover:bg-white">
             <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
-              <div className="min-w-0 flex-1">
-                <h2 className="text-xl font-black text-slate-950 transition-colors group-hover:text-indigo-600">{result.title}</h2>
-                <p className="mt-2 truncate text-[10px] font-black text-slate-400 uppercase tracking-tight">{result.pageUrl}</p>
+              <div className="flex flex-col gap-3 flex-1 min-w-0">
+                <h3 className="text-xl font-bold text-slate-900 leading-tight">
+                  {result.title}
+                </h3>
                 
                 {result.dates && (
-                  <div className="mt-4 inline-flex items-center rounded-lg bg-indigo-600 px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-white">
-                    {result.dates}
+                  <div className="flex items-center gap-2 px-3 py-1 rounded-lg bg-slate-100 border border-slate-200 text-slate-600 w-fit">
+                    <Calendar className="w-4 h-4" />
+                    <span className="text-xs font-bold uppercase tracking-wide">
+                      {result.dates}
+                    </span>
                   </div>
                 )}
-                
+
+                <a 
+                  href={result.pageUrl} 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="text-xs text-slate-400 hover:text-indigo-500 truncate transition-colors"
+                >
+                  {result.pageUrl}
+                </a>
                 {result.snippet && (
-                  <p className="mt-6 text-sm font-bold leading-relaxed text-slate-900" dangerouslySetInnerHTML={{ __html: result.snippet }} />
+                  <p className="mt-4 text-sm font-bold leading-relaxed text-slate-900">
+                    {toPlainSnippet(result.snippet)}
+                  </p>
                 )}
               </div>
               

@@ -1,11 +1,9 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
-import { useParams } from "next/navigation";
-import { isPlaceholderTeam } from "@/lib/teams";
-import { motion, AnimatePresence } from "framer-motion";
-import { Clock, Layers, LayoutGrid, CheckCircle2, History } from "lucide-react";
-import { DateTime } from "luxon";
+import { useMemo, useEffect } from "react";
+import { isPlaceholderTeam, normalizeTeamName } from "@/lib/teams";
+import { getTeamAliasKey } from "@/lib/teams/canonicalize";
+import { Clock, LayoutGrid, CheckCircle2, TimerReset } from "lucide-react";
 
 type Match = {
   id: string;
@@ -23,9 +21,22 @@ type Match = {
   status: string | null;
   syncedAt: Date | string | null;
   rawText: string | null;
+  hasPlaceholderTeams?: boolean | null;
+  sourceConfidence?: number | null;
+  sourceBreakdown?: unknown;
 };
 
 type MappingInfo = { alias: string | null; platformId: string | null; logoUrl?: string | null };
+
+const moscowDateFormatter = new Intl.DateTimeFormat("ru-RU", {
+  timeZone: "Europe/Moscow",
+  day: "2-digit",
+  month: "2-digit",
+  year: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
 
 function getMatchDateObj(match: Match): Date | null {
   let d: Date | null = null;
@@ -49,6 +60,14 @@ function getMatchTimestamp(match: Match): number | null {
   return d ? d.getTime() : null;
 }
 
+function isMatchPlaceholder(match: Match) {
+  return Boolean(
+    match.hasPlaceholderTeams ||
+    isPlaceholderTeam(match.teamAName) ||
+    isPlaceholderTeam(match.teamBName)
+  );
+}
+
 export default function MatchList({
   matches,
   mappings,
@@ -64,35 +83,14 @@ export default function MatchList({
   setSelectedIds: (ids: Set<string>) => void;
   mutate?: () => void;
 }) {
-  const params = useParams();
-  const tournamentId = params.id as string;
-  
-  const [showAll, setShowAll] = useState(false);
-  const [uploadHistory, setUploadHistory] = useState<any[]>([]);
-  const [mounted, setMounted] = useState(false);
-
   useEffect(() => {
-    setMounted(true);
-    async function fetchHistory() {
-      if (!tournamentId) return;
-      try {
-        const res = await fetch(`/api/${disciplineSlug}/tournament/${tournamentId}/upload-history`);
-        const data = await res.json();
-        if (data.ok) setUploadHistory(data.logs);
-      } catch (e) {
-        console.error("Failed to fetch upload history:", e);
-      }
-    }
-    fetchHistory();
-
     const handleSuccess = () => {
-      fetchHistory();
       if (mutate) mutate();
       setSelectedIds(new Set());
     };
     window.addEventListener('admin-upload-success', handleSuccess);
     return () => window.removeEventListener('admin-upload-success', handleSuccess);
-  }, [disciplineSlug, tournamentId, mutate, setSelectedIds]);
+  }, [mutate, setSelectedIds]);
 
   const displayMatches = useMemo(() => {
     const today = new Date();
@@ -120,19 +118,24 @@ export default function MatchList({
       });
   }, [matches]);
 
-  const allSelected = displayMatches.length > 0 && displayMatches.every(m => selectedIds.has(m.matchId || "unknown"));
+  const selectableMatches = useMemo(
+    () => displayMatches.filter((match) => !isMatchPlaceholder(match)),
+    [displayMatches]
+  );
+  const allSelected = selectableMatches.length > 0 && selectableMatches.every(m => selectedIds.has(m.matchId || "unknown"));
 
   function toggleAll() {
     const newIds = new Set(selectedIds);
     if (allSelected) {
-      displayMatches.forEach(m => newIds.delete(m.matchId || "unknown"));
+      selectableMatches.forEach(m => newIds.delete(m.matchId || "unknown"));
     } else {
-      displayMatches.forEach(m => newIds.add(m.matchId || "unknown"));
+      selectableMatches.forEach(m => newIds.add(m.matchId || "unknown"));
     }
     setSelectedIds(newIds);
   }
 
-  function toggleOne(id: string) {
+  function toggleOne(id: string, disabled = false) {
+    if (disabled) return;
     const newIds = new Set(selectedIds);
     if (newIds.has(id)) newIds.delete(id);
     else newIds.add(id);
@@ -142,24 +145,24 @@ export default function MatchList({
   function formatNeutralDate(match: Match): string {
     const d = getMatchDateObj(match);
     if (!d) return "—";
-    // Always use Europe/Moscow for deterministic rendering
-    return DateTime.fromJSDate(d).setZone("Europe/Moscow").toFormat("dd.MM.yyyy HH:mm");
+    return moscowDateFormatter.format(d).replace(",", "");
   }
 
   function TeamDisplay({ name, side }: { name: string | null; side: "left" | "right" }) {
     const isGenericTbd = !name || name.toLowerCase() === "tbd";
     const isNumberedTbd = name ? /^tbd\d+$/i.test(name) : false;
     const effectiveName = (isGenericTbd || isNumberedTbd) ? (name || "TBD") : name;
-    const m = mappings[effectiveName];
+    const m = mappings[effectiveName]
+      || mappings[effectiveName.toLowerCase()]
+      || mappings[normalizeTeamName(effectiveName)]
+      || mappings[getTeamAliasKey(effectiveName)];
     const pid = m?.platformId || "";
-    const logoUrl = m?.logoUrl;
-
     return (
-      <div className={`flex flex-col min-w-0 ${side === "left" ? "text-right" : "text-left"}`}>
-        <span className="truncate text-xl font-bold text-slate-900 leading-tight group-hover:text-indigo-600 transition-colors">
+      <div className={`flex flex-col min-w-0 ${side === "left" ? "text-left sm:text-right" : "text-left"}`}>
+        <span className="truncate text-base font-bold leading-tight text-slate-900 transition-colors group-hover:text-indigo-600 sm:text-xl">
           {effectiveName}
         </span>
-        <div className={`flex items-center gap-2 mt-1 ${side === "left" ? "justify-end" : "justify-start"}`}>
+        <div className={`flex items-center gap-2 mt-1 ${side === "left" ? "justify-start sm:justify-end" : "justify-start"}`}>
           <span className={`text-[9px] font-black px-2 py-0.5 rounded-full border ${pid ? "bg-emerald-50 border-emerald-100 text-emerald-700" : "bg-rose-50 border-rose-100 text-rose-600"}`}>
             {pid || "NO ID"}
           </span>
@@ -170,7 +173,7 @@ export default function MatchList({
 
   return (
     <div className="mt-4">
-      <div className="mb-8 flex flex-wrap items-center justify-between gap-4 border-b border-slate-100 pb-6">
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-4 border-b border-slate-100 pb-5">
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-slate-900 border border-slate-200">
             <LayoutGrid className="w-3 h-3" />
@@ -181,6 +184,7 @@ export default function MatchList({
         {displayMatches.length > 0 && (
           <button 
             onClick={toggleAll}
+            disabled={selectableMatches.length === 0}
             className="flex items-center gap-2.5 text-[10px] font-bold uppercase tracking-widest text-slate-400 hover:text-indigo-600 transition-colors"
           >
             <div className={`h-4 w-4 rounded border transition-all flex items-center justify-center ${
@@ -193,67 +197,61 @@ export default function MatchList({
         )}
       </div>
 
-      <AnimatePresence mode="popLayout">
-        {displayMatches.length === 0 ? (
-          <motion.div 
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="rounded-3xl border-2 border-dashed border-slate-200 p-12 text-center bg-white/50"
-          >
+      {displayMatches.length === 0 ? (
+          <div className="rounded-lg border-2 border-dashed border-slate-200 bg-white/70 p-12 text-center">
             <Clock className="w-12 h-12 text-slate-200 mx-auto mb-4" />
             <p className="text-sm font-medium text-slate-400">Нет предстоящих матчей.</p>
-          </motion.div>
+          </div>
         ) : (
-          <motion.div 
-            layout
-            className="grid gap-4"
-          >
-            {displayMatches.map((match, idx) => {
-              const isSelected = selectedIds.has(match.matchId || "unknown");
+          <div className="grid gap-4">
+            {displayMatches.map((match) => {
+              const isPlaceholder = isMatchPlaceholder(match);
+              const isSelected = !isPlaceholder && selectedIds.has(match.matchId || "unknown");
               
               return (
-                <motion.div
-                  layout
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  whileHover={{ scale: 1.01, y: -2, transition: { duration: 0.2 } }}
-                  transition={{ delay: idx * 0.02 }}
+                <div
                   key={match.matchId || match.id}
-                  onClick={() => toggleOne(match.matchId || "unknown")}
-                  className={`group relative flex flex-col rounded-[2rem] border p-6 transition-all cursor-pointer overflow-hidden bg-white ${
-                    isSelected ? "border-indigo-600 ring-1 ring-indigo-600/10 glow-primary" : "border-slate-200 hover:border-indigo-300 hover:shadow-xl"
+                  onClick={() => toggleOne(match.matchId || "unknown", isPlaceholder)}
+                  className={`group relative flex flex-col overflow-hidden rounded-lg border bg-white p-5 transition-colors ${
+                    isSelected ? "border-indigo-600 ring-1 ring-indigo-600/10" : isPlaceholder ? "cursor-not-allowed border-amber-200 bg-amber-50/20" : "cursor-pointer border-slate-200 hover:border-indigo-300 hover:bg-slate-50/40"
                   }`}
                 >
                   {/* Shimmer overlay for selected state */}
                   {isSelected && <div className="absolute inset-0 shimmer pointer-events-none" />}
                   
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-3">
-                      <div className={`h-2 w-2 rounded-full ${match.platformId ? "bg-emerald-500" : "bg-rose-500 animate-pulse"}`} />
+                  <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <div className={`h-2 w-2 rounded-full ${isPlaceholder ? "bg-amber-400" : match.platformId ? "bg-emerald-500" : "bg-rose-500 animate-pulse"}`} />
                       {match.platformId && (
                         <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
                           ID: <span className="text-slate-900">{match.platformId}</span>
                         </span>
                       )}
+                      {isPlaceholder && (
+                        <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-amber-700">
+                          <TimerReset className="h-3 w-3" />
+                          ОЖИДАЕТ КОМАНД
+                        </span>
+                      )}
                     </div>
-                    <div className="flex items-center gap-4">
+                    <div className="flex items-center justify-between gap-4 sm:justify-end">
                       <span suppressHydrationWarning className="text-xs font-bold text-slate-900 tabular-nums">
-                        {mounted ? formatNeutralDate(match) : "—"}
+                        {formatNeutralDate(match)}
                       </span>
                       <div className={`h-5 w-5 rounded-md border transition-all flex items-center justify-center ${
-                        isSelected ? "bg-indigo-600 border-indigo-600" : "bg-white border-slate-200"
+                        isSelected ? "bg-indigo-600 border-indigo-600" : isPlaceholder ? "bg-slate-100 border-slate-200 opacity-60" : "bg-white border-slate-200"
                       }`}>
                         {isSelected && <CheckCircle2 className="h-3.5 w-3.5 text-white" />}
                       </div>
                     </div>
                   </div>
 
-                  <div className="flex items-center justify-between gap-6">
-                    <div className="flex-1 min-w-0">
+                  <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] sm:items-center sm:gap-6">
+                    <div className="min-w-0">
                       <TeamDisplay name={match.teamAName} side="left" />
                     </div>
                     
-                    <div className="flex flex-col items-center gap-1 shrink-0">
+                    <div className="flex shrink-0 flex-row items-center gap-2 sm:flex-col sm:gap-1">
                       <div className="rounded-full bg-slate-50 border border-slate-100 px-3 py-0.5 text-[8px] font-bold text-slate-300 uppercase tracking-[0.3em]">VS</div>
                       {(match.scoreA != null || match.scoreB != null) && (
                         <div className="text-3xl font-bold tabular-nums gradient-text">
@@ -262,12 +260,12 @@ export default function MatchList({
                       )}
                     </div>
 
-                    <div className="flex-1 min-w-0">
+                    <div className="min-w-0">
                       <TeamDisplay name={match.teamBName} side="right" />
                     </div>
                   </div>
 
-                  <div className="mt-4 flex items-center justify-between text-[9px] font-bold text-slate-400 uppercase tracking-widest">
+                  <div className="mt-4 flex flex-col gap-2 text-[9px] font-bold uppercase tracking-widest text-slate-400 sm:flex-row sm:items-center sm:justify-between">
                      <div>{match.stage} {match.round ? `• ${match.round}` : ""}</div>
                      {match.syncedAt && (
                        <div className="text-emerald-600 flex items-center gap-1">
@@ -275,12 +273,11 @@ export default function MatchList({
                        </div>
                      )}
                   </div>
-                </motion.div>
+                </div>
               );
             })}
-          </motion.div>
+          </div>
         )}
-      </AnimatePresence>
     </div>
   );
 }

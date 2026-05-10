@@ -1,7 +1,9 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { toPhpString } from '@/lib/adminUpload/utils';
+import { dispatchAdminMappingUpdated, dispatchTournamentDataUpdated } from '@/lib/clientEvents';
 
 interface AdminMapping {
   adminShapkaId: string;
@@ -39,6 +41,7 @@ export default function AdminUploadPanel({
   tournamentName: string;
   selectedMatchIds?: string[];
 }) {
+  const router = useRouter();
   const [mapping, setMapping] = useState<AdminMapping>({ adminShapkaId: '', adminShapkaName: '' });
   const [settings, setSettings] = useState<Settings | null>(null);
   const [preview, setPreview] = useState<PreviewData | null>(null);
@@ -74,8 +77,8 @@ export default function AdminUploadPanel({
     const fetchData = async () => {
       try {
         const [mappingRes, settingsRes] = await Promise.all([
-          fetch(`/api/${disciplineSlug}/tournament/${tournamentId}/admin-mapping`),
-          fetch(`/api/admin-settings/${disciplineSlug}`)
+          fetch(`/api/${disciplineSlug}/tournament/${tournamentId}/admin-mapping`, { cache: 'no-store' }),
+          fetch(`/api/admin-settings/${disciplineSlug}`, { cache: 'no-store' })
         ]);
         
         const mappingData = await mappingRes.json();
@@ -95,10 +98,13 @@ export default function AdminUploadPanel({
     };
     fetchData();
 
+  }, [tournamentId, disciplineSlug]);
+
+  useEffect(() => {
     const handleTrigger = () => handlePreview();
     window.addEventListener('trigger-admin-preview', handleTrigger);
     return () => window.removeEventListener('trigger-admin-preview', handleTrigger);
-  }, [tournamentId, disciplineSlug, handlePreview]);
+  }, [handlePreview]);
 
   const handleSaveMapping = useCallback(async () => {
     setActionLoading(true);
@@ -116,13 +122,19 @@ export default function AdminUploadPanel({
       if (res.ok) {
         setLastSavedId(mapping.adminShapkaId);
         setIsEditing(false);
+        setPreview(null);
+        dispatchAdminMappingUpdated({ tournamentId, disciplineSlug });
+        router.refresh();
+      } else {
+        const data = await res.json().catch(() => null);
+        setResult({ type: 'error', text: data?.error || 'Ошибка сохранения ID' });
       }
     } catch (e) {
       setResult({ type: 'error', text: 'Ошибка сохранения ID' });
     } finally {
       setActionLoading(false);
     }
-  }, [disciplineSlug, tournamentId, mapping, tournamentName]);
+  }, [disciplineSlug, router, tournamentId, mapping, tournamentName]);
 
   const handleSend = async () => {
     if (!confirm('Залить данные в API?')) return;
@@ -143,6 +155,8 @@ export default function AdminUploadPanel({
         });
         // Dispatch custom event to refresh MatchList history
         window.dispatchEvent(new CustomEvent('admin-upload-success'));
+        dispatchTournamentDataUpdated({ tournamentId, disciplineSlug });
+        router.refresh();
       } else {
         const warningText = data.warnings && data.warnings.length > 0 
           ? `\n\nВнимание:\n${data.warnings.join('\n')}` 
@@ -163,18 +177,38 @@ export default function AdminUploadPanel({
   if (loading) return <div className="p-4 text-slate-400 font-normal animate-pulse">Загрузка данных админки...</div>;
 
   const effectiveShapkaId = mapping.adminShapkaId || settings?.defaultShapkaId;
-  const isShapkaOverride = !!mapping.adminShapkaId;
   const isSaved = mapping.adminShapkaId !== '' && mapping.adminShapkaId === lastSavedId;
+  const selectedCount = selectedMatchIds.length;
+  const readyCount = preview?.readyMatchesCount ?? selectedCount;
+  const sendDisabledReason = !settings?.apiUrl
+    ? "Не настроен API URL"
+    : !effectiveShapkaId
+      ? "Укажите ID шапки"
+      : !settings?.adminSportId
+        ? "Не настроен Sport ID"
+        : preview?.readyMatchesCount === 0
+          ? "Нет готовых матчей"
+          : selectedCount === 0
+            ? "Выберите матчи"
+            : null;
 
   return (
     <div className="space-y-6">
-      <section className="premium-card p-8 bg-white border-slate-200 shadow-sm">
-        <div className="mb-8 border-b border-slate-100 pb-6">
-          <h3 className="text-2xl font-medium text-slate-900 tracking-tight">Заливка в админ</h3>
-          <p className="mt-1 text-sm font-normal text-slate-500">Настройте ID шапки и нажмите кнопку «Залить».</p>
+      <section className="premium-card bg-white border-slate-200 shadow-sm">
+        <div className="mb-6 border-b border-slate-100 pb-5">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h3 className="text-xl font-bold text-slate-900 tracking-tight">Заливка в админ</h3>
+              <p className="mt-1 text-sm font-normal text-slate-500">Проверьте ID шапки и отправьте выбранные матчи.</p>
+            </div>
+            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-right">
+              <div className="text-[9px] font-black uppercase tracking-widest text-slate-400">Выбрано</div>
+              <div className="text-lg font-black text-slate-950">{selectedCount}</div>
+            </div>
+          </div>
         </div>
         
-        <div className="space-y-8">
+        <div className="space-y-6">
           {/* Shapka ID Input */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
@@ -221,14 +255,26 @@ export default function AdminUploadPanel({
           </div>
 
           {/* Action Buttons */}
-          <div className="flex flex-col sm:flex-row gap-4 pt-4 border-t border-slate-50">
+          <div className="flex flex-col gap-3 pt-4 border-t border-slate-100">
+            <button
+              type="button"
+              onClick={handlePreview}
+              disabled={actionLoading || selectedCount === 0}
+              className="min-h-[46px] rounded-lg border border-slate-200 bg-white px-4 text-xs font-black uppercase tracking-widest text-slate-600 transition-colors hover:bg-slate-50 disabled:opacity-50"
+            >
+              {actionLoading ? "Проверяю..." : `Проверить ${selectedCount || ""}`}
+            </button>
             <button
               onClick={handleSend}
-              disabled={actionLoading || !settings?.apiUrl || !effectiveShapkaId || !settings?.adminSportId || (preview?.readyMatchesCount === 0)}
-              className="flex-1 min-h-[64px] rounded-2xl bg-slate-500/5 backdrop-blur-sm text-slate-600 font-medium text-sm uppercase tracking-widest border border-slate-200/50 hover:bg-slate-500/10 transition-all disabled:opacity-50 disabled:grayscale"
+              disabled={actionLoading || Boolean(sendDisabledReason)}
+              title={sendDisabledReason ?? `Будет отправлено матчей: ${readyCount}`}
+              className="min-h-[54px] rounded-lg bg-slate-950 px-4 text-sm font-black uppercase tracking-widest text-white transition-colors hover:bg-indigo-600 disabled:bg-slate-100 disabled:text-slate-400"
             >
-              ЗАЛИТЬ
+              {actionLoading ? "Отправка..." : `Залить ${readyCount || ""}`}
             </button>
+            {sendDisabledReason && (
+              <p className="text-xs font-medium text-slate-500">{sendDisabledReason}</p>
+            )}
           </div>
         </div>
 

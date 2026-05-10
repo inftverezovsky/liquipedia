@@ -1,5 +1,8 @@
 import { DateTime } from 'luxon';
 import { prisma } from '@/lib/db';
+import { dedupeTournamentMatches } from '@/lib/matches/dedupe';
+import { isPlaceholderTeam } from '@/lib/teams';
+import { buildTeamMappingLookup, findTeamMapping } from '@/lib/teams/mappingLookup';
 import { resolveAdminSettings } from './resolveAdminSettings';
 
 export interface FixtMatch {
@@ -29,6 +32,13 @@ export async function buildFixtPayload(
 ): Promise<BuildResult> {
   const warnings: string[] = [];
   const skippedMatches: any[] = [];
+  const selectedMatchIds = matchIds
+    ?.filter((id): id is string => typeof id === 'string')
+    .map((id) => id.trim())
+    .filter(Boolean);
+  const matchIdFilter = selectedMatchIds && selectedMatchIds.length > 0
+    ? { in: selectedMatchIds }
+    : undefined;
 
   // 1. Fetch settings from Prisma (discipline-specific or global)
   const settings = await resolveAdminSettings(disciplineSlug);
@@ -49,7 +59,7 @@ export async function buildFixtPayload(
   const matches = await prisma.tournamentMatch.findMany({
     where: { 
       tournamentId,
-      matchId: matchIds ? { in: matchIds } : undefined
+      matchId: matchIdFilter
     },
     orderBy: { matchDate: 'asc' },
   });
@@ -59,13 +69,13 @@ export async function buildFixtPayload(
     where: { disciplineSlug },
   });
 
-  const mappingMap = new Map(
-    teamMappings.map((m) => [m.liquipediaName.toLowerCase(), m])
-  );
+  const mappingMap = buildTeamMappingLookup(teamMappings);
 
   const readyMatches: FixtMatch[] = [];
 
-  for (const match of matches) {
+  const dedupedMatches = dedupeTournamentMatches(matches);
+
+  for (const match of dedupedMatches) {
     const teamAName = match.teamAName;
     const teamBName = match.teamBName;
 
@@ -78,8 +88,17 @@ export async function buildFixtPayload(
       continue;
     }
 
-    const mappingA = mappingMap.get(teamAName.toLowerCase());
-    const mappingB = mappingMap.get(teamBName.toLowerCase());
+    if ((match as any).hasPlaceholderTeams || isPlaceholderTeam(teamAName) || isPlaceholderTeam(teamBName)) {
+      skippedMatches.push({
+        matchId: match.matchId,
+        reason: 'Placeholder/TBD teams are not upload-ready',
+        teams: `${teamAName} vs ${teamBName}`,
+      });
+      continue;
+    }
+
+    const mappingA = findTeamMapping(mappingMap, teamAName);
+    const mappingB = findTeamMapping(mappingMap, teamBName);
 
     const platformIdA = mappingA?.platformId;
     const platformIdB = mappingB?.platformId;
@@ -129,17 +148,37 @@ export async function buildFixtPayload(
       .setZone('Europe/Moscow')
       .toFormat('dd.MM.yyyy HH:mm:ss');
 
+    const team1 = parsePositiveInteger(platformIdA);
+    const team2 = parsePositiveInteger(platformIdB);
+
+    if (team1 === null || team2 === null) {
+      skippedMatches.push({
+        matchId: match.matchId,
+        reason: 'Invalid team platform IDs',
+        teams: `${teamAName} (${platformIdA}) vs ${teamBName} (${platformIdB})`,
+      });
+      continue;
+    }
+
     readyMatches.push({
       date: moscowDate,
-      team1: parseInt(platformIdA!, 10),
-      team2: parseInt(platformIdB!, 10),
+      team1,
+      team2,
     });
   }
 
-  const payload: FixtPayload | null = (shapkaId && sportId && max && readyMatches.length > 0) ? {
-    shapka: parseInt(shapkaId, 10),
-    sport: parseInt(sportId, 10),
-    max: parseInt(max, 10),
+  const parsedShapkaId = parsePositiveInteger(shapkaId);
+  const parsedSportId = parsePositiveInteger(sportId);
+  const parsedMax = parsePositiveInteger(max);
+
+  if (shapkaId && parsedShapkaId === null) warnings.push('Shapka ID must be a positive integer.');
+  if (sportId && parsedSportId === null) warnings.push('Sport ID must be a positive integer.');
+  if (max && parsedMax === null) warnings.push('Max must be a positive integer.');
+
+  const payload: FixtPayload | null = (parsedShapkaId && parsedSportId && parsedMax && readyMatches.length > 0) ? {
+    shapka: parsedShapkaId,
+    sport: parsedSportId,
+    max: parsedMax,
     match: readyMatches,
   } : null;
 
@@ -149,4 +188,11 @@ export async function buildFixtPayload(
     skippedMatches,
     warnings,
   };
+}
+
+function parsePositiveInteger(value: string | number | null | undefined) {
+  if (value === null || value === undefined || value === "") return null;
+
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
 }

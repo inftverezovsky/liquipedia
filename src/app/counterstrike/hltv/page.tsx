@@ -1,10 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { useMemo, useState, useEffect } from "react";
 import { Clock, Shield, AlertCircle, FileJson, FileCode, CheckCircle2, RotateCcw, Users, Eye, Image as ImageIcon } from "lucide-react";
 import { toPhpString } from "@/lib/adminUpload/utils";
-import Tesseract from 'tesseract.js';
+import { parseHltvCopiedText } from "@/lib/hltv/manualTextParser";
 import TeamMappingPanel from "@/components/TeamMappingPanel";
 
 interface HltvMatch {
@@ -20,12 +19,102 @@ interface HltvMatch {
   };
   date: string;
   isReady: boolean;
+  isLive?: boolean;
+}
+
+type HltvExportPayload = {
+  shapka: number;
+  sport: number;
+  max: number;
+  match: Array<{
+    date: string;
+    team1: number;
+    team2: number;
+  }>;
+};
+
+type MatchGroup = {
+  tournament: string;
+  matches: HltvMatch[];
+  firstMatchTime: number;
+};
+
+const UNKNOWN_DATE_TIME = Number.MAX_SAFE_INTEGER;
+
+function getTeamNameValue(team: unknown) {
+  if (team && typeof team === "object" && "name" in team) {
+    return String((team as { name?: string }).name || "TBD");
+  }
+
+  return String(team || "TBD");
+}
+
+function formatMatchCount(count: number) {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  const word = mod10 === 1 && mod100 !== 11
+    ? "матч"
+    : mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)
+      ? "матча"
+      : "матчей";
+
+  return `${count} ${word}`;
+}
+
+function parseMatchDateTime(date: string) {
+  if (!date) return UNKNOWN_DATE_TIME;
+
+  const normalized = date.trim();
+  const ruMatch = normalized.match(/^(\d{2})\.(\d{2})\.(\d{4})\s+(\d{2}):(\d{2})(?::(\d{2}))?/);
+  if (ruMatch) {
+    const [, day, month, year, hour, minute, second = "00"] = ruMatch;
+    const parsed = new Date(
+      Number(year),
+      Number(month) - 1,
+      Number(day),
+      Number(hour),
+      Number(minute),
+      Number(second)
+    ).getTime();
+    return Number.isNaN(parsed) ? UNKNOWN_DATE_TIME : parsed;
+  }
+
+  const parsed = new Date(normalized).getTime();
+  return Number.isNaN(parsed) ? UNKNOWN_DATE_TIME : parsed;
+}
+
+function groupMatchesByTournament(matches: HltvMatch[]): MatchGroup[] {
+  const sortedMatches = [...matches].sort((a, b) => {
+    const dateDelta = parseMatchDateTime(a.date) - parseMatchDateTime(b.date);
+    if (dateDelta !== 0) return dateDelta;
+    const tournamentDelta = a.tournament.localeCompare(b.tournament, "ru");
+    if (tournamentDelta !== 0) return tournamentDelta;
+    return `${a.team1.name} ${a.team2.name}`.localeCompare(`${b.team1.name} ${b.team2.name}`, "ru");
+  });
+
+  const groups = new Map<string, HltvMatch[]>();
+  for (const match of sortedMatches) {
+    const tournament = match.tournament?.trim() || "Без турнира";
+    groups.set(tournament, [...(groups.get(tournament) ?? []), match]);
+  }
+
+  return Array.from(groups.entries())
+    .map(([tournament, groupMatches]) => ({
+      tournament,
+      matches: groupMatches,
+      firstMatchTime: Math.min(...groupMatches.map((match) => parseMatchDateTime(match.date))),
+    }))
+    .sort((a, b) => {
+      const dateDelta = a.firstMatchTime - b.firstMatchTime;
+      if (dateDelta !== 0) return dateDelta;
+      return a.tournament.localeCompare(b.tournament, "ru");
+    });
 }
 
 export default function HltvMatchesPage() {
   const [activeTab, setActiveTab] = useState<"matches" | "teams">("matches");
   const [matches, setMatches] = useState<HltvMatch[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showManualImport, setShowManualImport] = useState(false);
@@ -42,12 +131,22 @@ export default function HltvMatchesPage() {
   const [actionLoading, setActionLoading] = useState(false);
   const [uploadResult, setUploadResult] = useState<{ type: 'success' | 'error'; text: string; raw?: string } | null>(null);
   const [isEditingShapka, setIsEditingShapka] = useState(false);
-
-  useEffect(() => {
-    fetchMatches();
-    fetchMappings();
-    fetchSettings();
-  }, []);
+  const groupedMatches = useMemo(() => groupMatchesByTournament(matches), [matches]);
+  const groupedPreviewMatches = useMemo(
+    () => groupMatchesByTournament(previewMatches.map((match: any) => ({
+      id: match.id || `${match.tournament || "manual"}-${match.team1}-${match.team2}-${match.date}`,
+      tournament: match.tournament || "HLTV Import",
+      team1: { name: getTeamNameValue(match.team1), platformId: null },
+      team2: { name: getTeamNameValue(match.team2), platformId: null },
+      date: match.date,
+      isReady: false,
+    }))),
+    [previewMatches]
+  );
+  const orderedPreviewMatches = useMemo(
+    () => groupedPreviewMatches.flatMap(group => group.matches),
+    [groupedPreviewMatches]
+  );
 
   const fetchSettings = async () => {
     try {
@@ -72,9 +171,11 @@ export default function HltvMatchesPage() {
     }
   };
 
-  const fetchMatches = async () => {
+  const fetchMatches = async (force = false) => {
+    setLoading(true);
+    setError(null);
     try {
-      const res = await fetch('/api/counterstrike/hltv/matches');
+      const res = await fetch(`/api/counterstrike/hltv/matches${force ? "?force=true" : ""}`);
       const data = await res.json();
       if (data.ok) {
         setMatches(data.matches);
@@ -88,6 +189,11 @@ export default function HltvMatchesPage() {
     }
   };
 
+  useEffect(() => {
+    fetchMappings();
+    fetchSettings();
+  }, []);
+
   const toggleSelection = (id: string) => {
     const next = new Set(selectedIds);
     if (next.has(id)) next.delete(id);
@@ -96,7 +202,9 @@ export default function HltvMatchesPage() {
   };
 
   const getExportData = () => {
-    const selectedMatches = matches.filter(m => selectedIds.has(m.id));
+    const selectedMatches = matches
+      .filter(m => selectedIds.has(m.id))
+      .sort((a, b) => parseMatchDateTime(a.date) - parseMatchDateTime(b.date));
     if (selectedMatches.length === 0) return null;
 
     return {
@@ -109,6 +217,56 @@ export default function HltvMatchesPage() {
         team2: parseInt(m.team2.platformId || "0")
       }))
     };
+  };
+
+  const openRawDataPage = (content: string) => {
+    const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+    const url = window.URL.createObjectURL(blob);
+    const opened = window.open(url, "_blank");
+
+    if (!opened) {
+      const link = document.createElement("a");
+      link.href = url;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.click();
+    }
+
+    window.setTimeout(() => window.URL.revokeObjectURL(url), 60_000);
+  };
+
+  const toCsvString = (data: HltvExportPayload) => {
+    const escapeCsv = (value: string | number) => {
+      const raw = String(value);
+      return /[",\n\r]/.test(raw) ? `"${raw.replace(/"/g, '""')}"` : raw;
+    };
+
+    const rows = [
+      ["shapka", "sport", "max", "date", "team1", "team2"],
+      ...data.match.map((match) => [
+        data.shapka,
+        data.sport,
+        data.max,
+        match.date,
+        match.team1,
+        match.team2,
+      ]),
+    ];
+
+    return rows.map((row) => row.map(escapeCsv).join(",")).join("\n");
+  };
+
+  const openExportPage = (format: "json" | "csv" | "php") => {
+    const data = getExportData();
+    if (!data) return;
+
+    const content = format === "json"
+      ? JSON.stringify(data, null, 2)
+      : format === "csv"
+        ? toCsvString(data)
+        : toPhpString(data);
+
+    openRawDataPage(content);
   };
 
   const handleSendToAdmin = async () => {
@@ -166,7 +324,8 @@ export default function HltvMatchesPage() {
     setIsProcessingOcr(true);
     setPreviewMatches([]);
     try {
-      const { data: { text } } = await Tesseract.recognize(file, 'eng+rus', {
+      const { recognize } = await import("tesseract.js");
+      const { data: { text } } = await recognize(file, 'eng+rus', {
         logger: m => console.log('[OCR]', m)
       });
       console.log('[OCR] Raw result:', text);
@@ -178,131 +337,6 @@ export default function HltvMatchesPage() {
     } finally {
       setIsProcessingOcr(false);
     }
-  };
-
-  // ============================================================
-  // HLTV TEXT PARSER — handles the exact copy-paste format:
-  //   Saturday - 2026-05-09
-  //   17:00
-  //   bo3
-  //   Nemiga
-  //   Nemiga        <-- duplicate (HLTV copies team name twice)
-  //   INOX Division
-  //   INOX Division <-- duplicate
-  //   17:00
-  //   bo3
-  //   AM
-  //   AM
-  //   CYBERSHOKE
-  //   CYBERSHOKE
-  // ============================================================
-  const parseHltvCopiedText = (text: string) => {
-    const allLines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-    
-    // Step 1: Remove consecutive duplicate lines
-    const lines: string[] = [];
-    for (let i = 0; i < allLines.length; i++) {
-      if (i > 0 && allLines[i] === allLines[i - 1]) continue;
-      lines.push(allLines[i]);
-    }
-
-    console.log("[HLTV Parser] Deduplicated lines:", lines);
-
-    const timeOnlyRegex = /^\d{1,2}:\d{2}$/;
-    const timeStartRegex = /^(\d{1,2}:\d{2})\s+(.+)/;
-    const dateRegex = /\d{4}-\d{2}-\d{2}/;
-    // bo3 / воз / bo1 / воЗ — OCR reads "bo3" as "воз" sometimes
-    const boRegex = /^(bo\d|во[з3s]|b[o0]\d)$/i;
-    const boStartRegex = /^(bo\d|во[з3s]|b[o0]\d)\s+(.+)/i;
-
-    const result: any[] = [];
-    let currentTime = "Unknown";
-    let currentDate = "";
-
-    // Step 2: Walk lines, extract time and team names
-    const teamNames: { name: string; time: string; date: string }[] = [];
-
-    // Clean OCR garbage from team name
-    const cleanName = (s: string) => {
-      return s
-        .replace(/[®©@|«»<>+%#§°^~]/g, '')    // Remove OCR symbol garbage from logos
-        .replace(/^[^a-zA-Zа-яА-Я]+\s*/g, '')  // Remove leading non-letter chars (logo: "8 Omega" → "Omega")
-        .replace(/^[a-zA-Zа-яА-Я]\s+/g, '')   // Remove leading single letter (logo: "A TOK"→"TOK", "ф HAVU"→"HAVU")
-        .replace(/\s+(Lal|lal|LI|li|ll|Lall|lall)$/i, '') // Remove trailing chart icon text
-        .replace(/\s+[A-Z]$/, '')               // Remove trailing single uppercase letter (icon: "UNITY E" → "UNITY")
-        .replace(/\s+/g, ' ')                   // Collapse whitespace
-        .trim();
-    };
-
-    for (const line of lines) {
-      // Skip date headers like "Saturday - 2026-05-09"
-      if (dateRegex.test(line)) {
-        const dm = line.match(dateRegex);
-        if (dm) currentDate = dm[0];
-        continue;
-      }
-
-      // Line is ONLY time (e.g. "17:00")
-      if (timeOnlyRegex.test(line)) {
-        currentTime = line;
-        continue;
-      }
-
-      // Line starts with time + team name (OCR format: "17:00 | ® Nemiga")
-      const timeTeamMatch = line.match(timeStartRegex);
-      if (timeTeamMatch) {
-        currentTime = timeTeamMatch[1];
-        const rest = cleanName(timeTeamMatch[2]);
-        if (rest.length > 1) {
-          teamNames.push({ name: rest, time: currentTime, date: currentDate });
-        }
-        continue;
-      }
-
-      // Line is ONLY bo3/bo5
-      if (boRegex.test(line)) continue;
-
-      // Line starts with bo3/воз + team name (OCR: "воз © INOX Division")
-      const boTeamMatch = line.match(boStartRegex);
-      if (boTeamMatch) {
-        const rest = cleanName(boTeamMatch[2]);
-        if (rest.length > 1) {
-          teamNames.push({ name: rest, time: currentTime, date: currentDate });
-        }
-        continue;
-      }
-
-      // Everything else is a team name
-      const cleaned = cleanName(line);
-      if (cleaned.length > 1) {
-        teamNames.push({ name: cleaned, time: currentTime, date: currentDate });
-      }
-    }
-
-    console.log("[HLTV Parser] Found team entries:", teamNames);
-
-    // Step 3: Pair teams (every 2 = 1 match)
-    for (let i = 0; i < teamNames.length - 1; i += 2) {
-      const t1 = teamNames[i];
-      const t2 = teamNames[i + 1];
-      
-      // Format: dd.mm.YYYY HH:mm:ss
-      let dateStr = t1.time;
-      if (t1.date) {
-        const [y, mo, d] = t1.date.split('-');
-        dateStr = `${d}.${mo}.${y} ${t1.time}:00`;
-      }
-      
-      result.push({
-        id: 'hltv-' + Math.random().toString(36).substr(2, 6),
-        tournament: "HLTV Import",
-        team1: t1.name,
-        team2: t2.name,
-        date: dateStr
-      });
-    }
-
-    return result;
   };
 
   // Also support JSON (from console script) and HTML
@@ -340,7 +374,13 @@ export default function HltvMatchesPage() {
     try {
       // Use preview if available, otherwise parse now
       let parsedMatches = previewMatches.length > 0 
-        ? previewMatches 
+        ? orderedPreviewMatches.map(match => ({
+            id: match.id,
+            tournament: match.tournament,
+            team1: match.team1.name,
+            team2: match.team2.name,
+            date: match.date,
+          }))
         : parseContent(manualContent);
 
       if (parsedMatches.length === 0) {
@@ -397,42 +437,15 @@ export default function HltvMatchesPage() {
   };
 
   const exportToCsv = () => {
-    const data = getExportData();
-    if (!data) return;
-    
-    let csv = "date,team1,team2,shapka,sport\n";
-    data.match.forEach(m => {
-      csv += `${m.date},${m.team1},${m.team2},${data.shapka},${data.sport}\n`;
-    });
-    
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `hltv_export_${new Date().toISOString().split('T')[0]}.csv`;
-    a.click();
+    openExportPage("csv");
   };
 
   const exportToPhp = () => {
-    const data = getExportData();
-    if (!data) return;
-    const php = toPhpString(data);
-    const win = window.open("", "_blank");
-    if (win) {
-      win.document.write(`<pre>${php}</pre>`);
-      win.document.close();
-    }
+    openExportPage("php");
   };
 
   const exportToJson = () => {
-    const data = getExportData();
-    if (!data) return;
-    const json = JSON.stringify(data, null, 2);
-    const win = window.open("", "_blank");
-    if (win) {
-      win.document.write(`<pre>${json}</pre>`);
-      win.document.close();
-    }
+    openExportPage("json");
   };
 
   if (loading) {
@@ -456,11 +469,13 @@ export default function HltvMatchesPage() {
 
         <div className="flex items-center gap-3">
           <button 
-            onClick={() => window.location.reload()}
-            title="Обновить данные"
-            className="p-3 bg-white border border-slate-200 rounded-2xl text-slate-400 hover:text-indigo-600 hover:border-indigo-200 transition shadow-sm"
+            onClick={() => fetchMatches(matches.length > 0)}
+            disabled={loading}
+            title={matches.length > 0 ? "Обновить данные" : "Загрузить данные"}
+            className="flex items-center gap-2 px-4 py-3 bg-white border border-slate-200 rounded-2xl text-slate-500 hover:text-indigo-600 hover:border-indigo-200 transition shadow-sm text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
           >
-            <RotateCcw className="w-5 h-5" />
+            <RotateCcw className={`w-5 h-5 ${loading ? "animate-spin" : ""}`} />
+            {matches.length > 0 ? "Обновить" : "Загрузить"}
           </button>
           <button 
             onClick={() => setShowManualImport(true)}
@@ -493,11 +508,7 @@ export default function HltvMatchesPage() {
       </div>
 
       {activeTab === "matches" && (
-        <motion.div 
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="grid gap-6 md:grid-cols-12"
-        >
+        <div className="grid gap-6 md:grid-cols-12 animate-in">
           {/* Admin Panels */}
           <div className="md:col-span-4 space-y-6">
             {/* Export Panel */}
@@ -633,97 +644,101 @@ export default function HltvMatchesPage() {
           </div>
 
           <div className="md:col-span-8">
-            <AnimatePresence mode="wait">
-              <motion.div
-                key="matches"
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -20 }}
-                className="grid gap-4"
-              >
-                {matches.map((match, idx) => (
-                  <motion.div
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: idx * 0.03 }}
-                    key={match.id}
-                    onClick={() => toggleSelection(match.id)}
-                    className={`group relative flex flex-col rounded-[2rem] border p-6 transition-all cursor-pointer overflow-hidden bg-white ${
-                      selectedIds.has(match.id) ? "border-indigo-600 ring-1 ring-indigo-600/10" : "border-slate-200 hover:border-indigo-300 shadow-sm"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between mb-4">
-                      <div className="flex items-center gap-3">
-                        <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-200 uppercase tracking-widest">
-                          {match.tournament}
-                        </span>
+            <div className="space-y-8">
+                {groupedMatches.map((group) => (
+                  <section key={group.tournament} className="space-y-4">
+                    <div className="sticky top-4 z-10 flex items-center justify-between rounded-2xl border border-slate-200 bg-white/90 px-5 py-3 shadow-sm backdrop-blur">
+                      <div className="min-w-0">
+                        <h2 className="truncate text-sm font-black uppercase tracking-[0.18em] text-slate-900">
+                          {group.tournament}
+                        </h2>
+                        <p className="mt-0.5 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                          {formatMatchCount(group.matches.length)} • сортировка по дате
+                        </p>
                       </div>
-                      <div className="flex items-center gap-4">
-                        <span className="text-xs font-bold text-slate-900 tabular-nums flex items-center gap-2">
-                          <Clock className="w-3 h-3 text-slate-400" />
-                          {match.date}
-                        </span>
-                        <div className={`h-5 w-5 rounded-md border transition-all flex items-center justify-center ${
-                          selectedIds.has(match.id) ? "bg-indigo-600 border-indigo-600" : "bg-white border-slate-200"
-                        }`}>
-                          {selectedIds.has(match.id) && <CheckCircle2 className="h-3.5 w-3.5 text-white" />}
-                        </div>
-                      </div>
+                      <span className="shrink-0 rounded-full bg-indigo-50 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-indigo-600">
+                        {group.firstMatchTime === UNKNOWN_DATE_TIME ? "Дата TBD" : group.matches[0].date.split(" ")[0]}
+                      </span>
                     </div>
 
-                    <div className="flex items-center justify-between gap-12">
-                      <div 
-                        className="flex-1 text-right group/team cursor-help"
-                        onClick={(e) => openMapping(match.team1, e)}
-                      >
-                        <div className="text-xl font-bold text-slate-900 group-hover/team:text-indigo-600 transition-colors">{match.team1.name}</div>
-                        <div className={`text-[9px] font-black mt-1 px-2 py-0.5 rounded-full inline-block ${match.team1.platformId ? 'bg-emerald-50 text-emerald-500 border border-emerald-100' : 'bg-rose-50 text-rose-400 border border-rose-100'}`}>
-                          {match.team1.platformId ? `ID: ${match.team1.platformId}` : 'CLICK TO MAP'}
-                        </div>
-                      </div>
+                    <div className="grid gap-4">
+                      {group.matches.map((match) => (
+                        <div
+                          key={match.id}
+                          onClick={() => toggleSelection(match.id)}
+                          className={`group relative flex flex-col rounded-[2rem] border p-6 transition-all cursor-pointer overflow-hidden bg-white ${
+                            selectedIds.has(match.id) ? "border-indigo-600 ring-1 ring-indigo-600/10" : "border-slate-200 hover:border-indigo-300 shadow-sm"
+                          }`}
+                        >
+                          <div className="flex items-center justify-end mb-4">
+                            <div className="flex items-center gap-4">
+                              <span className="text-xs font-bold text-slate-900 tabular-nums flex items-center gap-2">
+                                <Clock className="w-3 h-3 text-slate-400" />
+                                {match.date}
+                              </span>
+                              <div className={`h-5 w-5 rounded-md border transition-all flex items-center justify-center ${
+                                selectedIds.has(match.id) ? "bg-indigo-600 border-indigo-600" : "bg-white border-slate-200"
+                              }`}>
+                                {selectedIds.has(match.id) && <CheckCircle2 className="h-3.5 w-3.5 text-white" />}
+                              </div>
+                            </div>
+                          </div>
 
-                      <div className="shrink-0 flex flex-col items-center">
-                        <div className="rounded-full bg-slate-50 border border-slate-100 px-3 py-1 text-[8px] font-bold text-slate-300 uppercase tracking-[0.3em]">VS</div>
-                      </div>
+                          <div className="flex items-center justify-between gap-12">
+                            <div 
+                              className="flex-1 text-right group/team cursor-help"
+                              onClick={(e) => openMapping(match.team1, e)}
+                            >
+                              <div className="text-xl font-bold text-slate-900 group-hover/team:text-indigo-600 transition-colors">{match.team1.name}</div>
+                              <div className={`text-[9px] font-black mt-1 px-2 py-0.5 rounded-full inline-block ${match.team1.platformId ? 'bg-emerald-50 text-emerald-500 border border-emerald-100' : 'bg-rose-50 text-rose-400 border border-rose-100'}`}>
+                                {match.team1.platformId ? `ID: ${match.team1.platformId}` : 'CLICK TO MAP'}
+                              </div>
+                            </div>
 
-                      <div 
-                        className="flex-1 text-left group/team cursor-help"
-                        onClick={(e) => openMapping(match.team2, e)}
-                      >
-                        <div className="text-xl font-bold text-slate-900 group-hover/team:text-indigo-600 transition-colors">{match.team2.name}</div>
-                        <div className={`text-[9px] font-black mt-1 px-2 py-0.5 rounded-full inline-block ${match.team2.platformId ? 'bg-emerald-50 text-emerald-500 border border-emerald-100' : 'bg-rose-50 text-rose-400 border border-rose-100'}`}>
-                          {match.team2.platformId ? `ID: ${match.team2.platformId}` : 'CLICK TO MAP'}
+                            <div className="shrink-0 flex flex-col items-center">
+                              <div className="rounded-full bg-slate-50 border border-slate-100 px-3 py-1 text-[8px] font-bold text-slate-300 uppercase tracking-[0.3em]">VS</div>
+                            </div>
+
+                            <div 
+                              className="flex-1 text-left group/team cursor-help"
+                              onClick={(e) => openMapping(match.team2, e)}
+                            >
+                              <div className="text-xl font-bold text-slate-900 group-hover/team:text-indigo-600 transition-colors">{match.team2.name}</div>
+                              <div className={`text-[9px] font-black mt-1 px-2 py-0.5 rounded-full inline-block ${match.team2.platformId ? 'bg-emerald-50 text-emerald-500 border border-emerald-100' : 'bg-rose-50 text-rose-400 border border-rose-100'}`}>
+                                {match.team2.platformId ? `ID: ${match.team2.platformId}` : 'CLICK TO MAP'}
+                              </div>
+                            </div>
+                          </div>
+
+                          {!match.isReady && (
+                            <div className="mt-4 flex items-center gap-2 text-[10px] font-bold text-rose-500 bg-rose-50/50 rounded-xl px-3 py-2 border border-rose-100/50">
+                              <AlertCircle className="w-3 h-3" />
+                              ОДНА ИЛИ ОБЕ КОМАНДЫ НЕ ПРИВЯЗАНЫ К ID ПЛАТФОРМЫ
+                            </div>
+                          )}
                         </div>
-                      </div>
+                      ))}
                     </div>
-
-                    {!match.isReady && (
-                      <div className="mt-4 flex items-center gap-2 text-[10px] font-bold text-rose-500 bg-rose-50/50 rounded-xl px-3 py-2 border border-rose-100/50">
-                        <AlertCircle className="w-3 h-3" />
-                        ОДНА ИЛИ ОБЕ КОМАНДЫ НЕ ПРИВЯЗАНЫ К ID ПЛАТФОРМЫ
-                      </div>
-                    )}
-                  </motion.div>
+                  </section>
                 ))}
-              </motion.div>
-            </AnimatePresence>
+                {groupedMatches.length === 0 && (
+                  <div className="rounded-[2rem] border border-dashed border-slate-200 bg-white p-12 text-center">
+                    <p className="text-xs font-black uppercase tracking-widest text-slate-400">Нет матчей для отображения</p>
+                  </div>
+                )}
+            </div>
           </div>
-        </motion.div>
+        </div>
       )}
 
       {activeTab === "teams" && (
-        <motion.div
-          key="teams"
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -20 }}
-        >
+        <div className="animate-in">
           <TeamMappingPanel 
             disciplineSlug="counterstrike"
             initialMappings={allMappings}
             teamNames={Array.from(new Set(matches.flatMap(m => [m.team1.name, m.team2.name])))}
           />
-        </motion.div>
+        </div>
       )}
 
       {/* Manual Import Modal */}
@@ -774,18 +789,31 @@ export default function HltvMatchesPage() {
 
             {/* Preview results */}
             {previewMatches.length > 0 && (
-              <div className="mt-6 space-y-3">
+              <div className="mt-6 space-y-4">
                 <p className="text-[10px] font-black text-emerald-600 uppercase tracking-widest">
                   ✓ Распознано матчей: {previewMatches.length}
                 </p>
-                {previewMatches.map((m, i) => (
-                  <div key={i} className="flex items-center gap-4 p-4 bg-slate-50 rounded-2xl border border-slate-200">
-                    <span className="text-xs font-bold text-slate-400 tabular-nums w-8">{i + 1}.</span>
-                    <span className="text-sm font-bold text-slate-900 flex-1 text-right">{m.team1}</span>
-                    <span className="text-[8px] font-bold text-slate-300 uppercase tracking-widest">vs</span>
-                    <span className="text-sm font-bold text-slate-900 flex-1">{m.team2}</span>
-                    <span className="text-xs font-mono text-indigo-600 bg-indigo-50 px-2 py-1 rounded-lg">{m.date}</span>
-                  </div>
+                {groupedPreviewMatches.map((group) => (
+                  <section key={group.tournament} className="space-y-2">
+                    <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-4 py-2">
+                      <span className="truncate text-[10px] font-black uppercase tracking-[0.18em] text-slate-600">
+                        {group.tournament}
+                      </span>
+                      <span className="shrink-0 text-[10px] font-black uppercase tracking-widest text-indigo-600">
+                        {formatMatchCount(group.matches.length)}
+                      </span>
+                    </div>
+
+                    {group.matches.map((m, i) => (
+                      <div key={m.id} className="flex items-center gap-4 p-4 bg-white rounded-2xl border border-slate-200">
+                        <span className="text-xs font-bold text-slate-400 tabular-nums w-8">{i + 1}.</span>
+                        <span className="text-sm font-bold text-slate-900 flex-1 text-right">{m.team1.name}</span>
+                        <span className="text-[8px] font-bold text-slate-300 uppercase tracking-widest">vs</span>
+                        <span className="text-sm font-bold text-slate-900 flex-1">{m.team2.name}</span>
+                        <span className="text-xs font-mono text-indigo-600 bg-indigo-50 px-2 py-1 rounded-lg">{m.date}</span>
+                      </div>
+                    ))}
+                  </section>
                 ))}
 
                 {/* PHP Preview */}
@@ -796,7 +824,7 @@ export default function HltvMatchesPage() {
   shapka: 0,
   sport: parseInt(sportId),
   max: 5000,
-  match: previewMatches.map(m => ({
+  match: orderedPreviewMatches.map(m => ({
     date: m.date,
     team1: 0,
     team2: 0

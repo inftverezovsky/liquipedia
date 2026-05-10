@@ -1,19 +1,48 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { requireAdmin } from "@/lib/adminAuth";
+import { dedupeTournamentMatches } from "@/lib/matches/dedupe";
+import { buildTeamMappingLookup, findTeamMapping } from "@/lib/teams/mappingLookup";
+import { isPlaceholderTeam } from "@/lib/teams";
+
+const SYNC_TIMEOUT_MS = 15000;
+const MAX_ERROR_BYTES = 4096;
 
 export async function POST(request: Request) {
+  const unauthorized = await requireAdmin(request);
+  if (unauthorized) return unauthorized;
+
   try {
     const { matchIds, disciplineSlug } = await request.json();
 
     if (!matchIds || !Array.isArray(matchIds)) {
       return NextResponse.json({ error: "matchIds array is required" }, { status: 400 });
     }
+    if (typeof disciplineSlug !== "string" || disciplineSlug.length === 0) {
+      return NextResponse.json({ error: "disciplineSlug is required" }, { status: 400 });
+    }
+
+    const requestedIds = matchIds
+      .filter((id): id is string => typeof id === "string")
+      .map((id) => id.trim())
+      .filter(Boolean);
+
+    if (requestedIds.length === 0) {
+      return NextResponse.json({ error: "matchIds array is empty" }, { status: 400 });
+    }
 
     // 1. Fetch matches with their tournament data
-    const matches = await prisma.tournamentMatch.findMany({
-      where: { id: { in: matchIds } },
+    const fetchedMatches = await prisma.tournamentMatch.findMany({
+      where: {
+        OR: [
+          { id: { in: requestedIds } },
+          { matchId: { in: requestedIds } },
+        ],
+        tournament: { disciplineSlug },
+      },
       include: { tournament: true },
     });
+    const matches = dedupeTournamentMatches(fetchedMatches);
 
     // 2. Fetch all unique team names from these matches to get their platform IDs
     const teamNames = new Set<string>();
@@ -22,27 +51,11 @@ export async function POST(request: Request) {
       if (m.teamBName) teamNames.add(m.teamBName);
     });
 
-    const mappings = await prisma.teamMapping.findMany({
-      where: {
-        disciplineSlug,
-        OR: [
-          { liquipediaName: { in: Array.from(teamNames) } },
-          { alias: { in: Array.from(teamNames) } }
-        ]
-      }
-    });
+    const mappings = await prisma.teamMapping.findMany({ where: { disciplineSlug } });
 
-    // Build a lookup map that handles both canonical names and aliases
-    const mappingMap = new Map<string, any>();
-    mappings.forEach(m => {
-      if (m.liquipediaName) mappingMap.set(m.liquipediaName.toLowerCase(), m);
-      if (m.alias) {
-        const aliases = m.alias.split(',').map(a => a.trim().toLowerCase());
-        aliases.forEach(a => {
-          if (a) mappingMap.set(a, m);
-        });
-      }
-    });
+    // Build a lookup map that handles canonical names and aliases while
+    // preferring saved/manual IDs over old unmapped duplicates.
+    const mappingMap = buildTeamMappingLookup(mappings);
 
     // 3. Get target URL from settings
     const targetUrlSetting = await prisma.globalSettings.findUnique({ where: { key: "external_platform_url" } });
@@ -52,12 +65,39 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "External Platform URL not configured in settings" }, { status: 400 });
     }
 
-    // 4. Prepare data for the external platform
-    const payload = matches.map(m => {
-      const teamA = mappingMap.get((m.teamAName || "").toLowerCase());
-      const teamB = mappingMap.get((m.teamBName || "").toLowerCase());
+    if (!isAllowedExternalUrl(targetUrlSetting.value)) {
+      return NextResponse.json({ error: "External Platform URL is not allowed" }, { status: 400 });
+    }
 
-      return {
+    const skippedMatches: Array<{ matchId: string | null; reason: string; teams: string }> = [];
+
+    // 4. Prepare data for the external platform
+    const payload = matches.flatMap(m => {
+      const teamAName = m.teamAName || "";
+      const teamBName = m.teamBName || "";
+
+      if ((m as any).hasPlaceholderTeams || isPlaceholderTeam(teamAName) || isPlaceholderTeam(teamBName)) {
+        skippedMatches.push({
+          matchId: m.matchId,
+          reason: "Placeholder/TBD teams are not sync-ready",
+          teams: `${teamAName || "?"} vs ${teamBName || "?"}`,
+        });
+        return [];
+      }
+
+      const teamA = findTeamMapping(mappingMap, m.teamAName);
+      const teamB = findTeamMapping(mappingMap, m.teamBName);
+
+      if (!teamA?.platformId || !teamB?.platformId) {
+        skippedMatches.push({
+          matchId: m.matchId,
+          reason: "Missing mapped platform IDs",
+          teams: `${teamAName || "?"} vs ${teamBName || "?"}`,
+        });
+        return [];
+      }
+
+      return [{
         externalId: m.id,
         liquipediaMatchId: m.matchId,
         tournament: {
@@ -82,10 +122,19 @@ export async function POST(request: Request) {
         format: m.format,
         stage: m.stage,
         round: m.round,
-      };
+      }];
     });
 
+    if (payload.length === 0) {
+      return NextResponse.json({
+        error: "No sync-ready matches found",
+        skippedMatches,
+      }, { status: 400 });
+    }
+
     // 5. Send to external platform
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), SYNC_TIMEOUT_MS);
     const response = await fetch(targetUrlSetting.value, {
       method: "POST",
       headers: {
@@ -93,22 +142,55 @@ export async function POST(request: Request) {
         "Authorization": `Bearer ${targetApiKeySetting?.value || ""}`,
       },
       body: JSON.stringify({ matches: payload }),
-    });
+      signal: controller.signal,
+    }).finally(() => clearTimeout(timeout));
 
     if (!response.ok) {
-      const errorText = await response.text();
+      const errorText = (await response.text()).slice(0, MAX_ERROR_BYTES);
       throw new Error(`External platform returned error: ${errorText}`);
     }
 
     // 6. Mark matches as synced
     await prisma.tournamentMatch.updateMany({
-      where: { id: { in: matchIds } },
+      where: { id: { in: payload.map((match) => match.externalId) } },
       data: { syncedAt: new Date() },
     });
 
-    return NextResponse.json({ success: true, count: matches.length });
+    return NextResponse.json({ success: true, count: payload.length, skippedMatches });
   } catch (error: any) {
     console.error("Sync Error:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
+}
+
+function isAllowedExternalUrl(rawUrl: string) {
+  try {
+    const url = new URL(rawUrl);
+    if (!["https:", "http:"].includes(url.protocol)) return false;
+
+    const allowedHosts = (process.env.EXTERNAL_PLATFORM_ALLOWED_HOSTS || "")
+      .split(",")
+      .map((host) => host.trim().toLowerCase())
+      .filter(Boolean);
+
+    if (allowedHosts.length > 0) {
+      return allowedHosts.includes(url.hostname.toLowerCase());
+    }
+
+    return !isPrivateHost(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
+function isPrivateHost(hostname: string) {
+  const host = hostname.toLowerCase();
+  return (
+    host === "localhost" ||
+    host === "127.0.0.1" ||
+    host === "::1" ||
+    host.startsWith("10.") ||
+    host.startsWith("192.168.") ||
+    /^172\.(1[6-9]|2\d|3[0-1])\./.test(host)
+  );
 }

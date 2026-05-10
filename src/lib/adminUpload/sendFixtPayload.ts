@@ -2,6 +2,9 @@ import https from 'https';
 import { URL } from 'url';
 import { getAdminHttpClientOptions } from './adminHttpClient';
 
+const ADMIN_REQUEST_TIMEOUT_MS = 15000;
+const MAX_ADMIN_RESPONSE_BYTES = 1024 * 1024;
+
 export interface SendResult {
   rawResponse: string;
   status: 'success' | 'success_like' | 'failed';
@@ -52,13 +55,18 @@ export async function sendFixtPayload(
           'Accept': '*/*',
           'Content-Length': Buffer.byteLength(body),
         },
-        agent: agent,
+        agent: isHttps ? agent : undefined,
         rejectUnauthorized: sslVerify,
       };
 
       const req = (isHttps ? https : require('http')).request(options, (res: any) => {
         let data = '';
         res.on('data', (chunk: any) => {
+          if (Buffer.byteLength(data) + Buffer.byteLength(chunk) > MAX_ADMIN_RESPONSE_BYTES) {
+            req.destroy(new Error('Admin API response is too large'));
+            return;
+          }
+
           data += chunk;
         });
         res.on('end', () => {
@@ -89,6 +97,10 @@ export async function sendFixtPayload(
           status: 'failed',
           errorMessage: err.message,
         });
+      });
+
+      req.setTimeout(ADMIN_REQUEST_TIMEOUT_MS, () => {
+        req.destroy(new Error('Admin API request timed out'));
       });
 
       req.write(body);

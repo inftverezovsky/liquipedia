@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getOrCreateDota2Discipline } from "@/lib/disciplines";
+import { requireAdmin } from "@/lib/adminAuth";
 
 export async function GET() {
   try {
@@ -12,6 +13,9 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  const unauthorized = await requireAdmin(req);
+  if (unauthorized) return unauthorized;
+
   try {
     const { platformId } = await req.json();
     const discipline = await getOrCreateDota2Discipline();

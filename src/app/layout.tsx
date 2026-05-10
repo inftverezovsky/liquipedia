@@ -13,10 +13,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="ru">
       <body className="bg-slate-100 text-slate-900 selection:bg-indigo-100">
         <div className="flex min-h-screen flex-col">
-          <header className="sticky top-0 z-50 border-b border-slate-200 bg-white/80 backdrop-blur-md">
-            <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
-              <Link href="/" className="flex items-center gap-2 group">
-                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600 font-bold text-white shadow-lg shadow-indigo-500/20 group-hover:scale-110 transition-transform">
+          <header className="sticky top-0 z-50 border-b border-slate-200 bg-white/95 backdrop-blur-sm">
+            <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-3 md:flex-row md:items-center md:justify-between md:px-6">
+              <Link href="/" className="flex shrink-0 items-center gap-2 group">
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600 font-bold text-white shadow-sm transition-colors group-hover:bg-indigo-700">
                   T
                 </div>
                 <span className="text-xl font-bold tracking-tight text-slate-900 group-hover:text-indigo-600 transition-colors">
@@ -26,14 +26,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               
               <Navbar />
 
-              <div className="flex items-center gap-3">
+              <div className="hidden shrink-0 items-center gap-3 sm:flex">
                 <div className="h-2 w-2 rounded-full bg-indigo-50 shadow-[0_0_8px_rgba(79,70,229,0.5)]" />
                 <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Stable</span>
               </div>
             </div>
           </header>
 
-          <main className="mx-auto w-full max-w-7xl flex-1 px-6 py-10 animate-in">
+          <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 md:px-6 md:py-8 animate-in">
             {children}
           </main>
           

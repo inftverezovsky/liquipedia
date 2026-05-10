@@ -1,24 +1,38 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { requireAdmin } from "@/lib/adminAuth";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(request: Request) {
+  const unauthorized = await requireAdmin(request);
+  if (unauthorized) return unauthorized;
+
   try {
     const settings = await prisma.globalSettings.findMany();
-    const config = settings.reduce((acc, s) => ({ ...acc, [s.key]: s.value }), {});
-    return NextResponse.json(config);
+    const config = settings.reduce((acc, s) => {
+      if (isSecretSetting(s.key)) return acc;
+      return { ...acc, [s.key]: s.value };
+    }, {});
+
+    return NextResponse.json(config, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     return NextResponse.json({ error: "Failed to fetch settings" }, { status: 500 });
   }
 }
 
 export async function POST(request: Request) {
+  const unauthorized = await requireAdmin(request);
+  if (unauthorized) return unauthorized;
+
   try {
     const data = await request.json();
     const { key, value } = data;
 
     if (!key) return NextResponse.json({ error: "Key is required" }, { status: 400 });
+    if (isSecretSetting(key) && String(value) === "") {
+      return NextResponse.json({ success: true, skipped: true });
+    }
 
     await prisma.globalSettings.upsert({
       where: { key },
@@ -30,4 +44,8 @@ export async function POST(request: Request) {
   } catch (error) {
     return NextResponse.json({ error: "Failed to update settings" }, { status: 500 });
   }
+}
+
+function isSecretSetting(key: string) {
+  return /password|secret|token|api[_-]?key/i.test(key);
 }

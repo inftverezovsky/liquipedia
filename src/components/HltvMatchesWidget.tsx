@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import Link from "next/link";
-import { Clock, Zap, AlertCircle, CheckCircle2, ArrowRight } from "lucide-react";
+import { Clock, Zap, AlertCircle, CheckCircle2, ArrowRight, Loader2 } from "lucide-react";
 
 type HltvMatch = {
   id: string;
@@ -11,38 +11,38 @@ type HltvMatch = {
   team2: { name: string; platformId: string | null };
   date: string;
   isReady: boolean;
+  isLive?: boolean;
 };
 
 export default function HltvMatchesWidget() {
   const [matches, setMatches] = useState<HltvMatch[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    async function fetchMatches() {
-      try {
-        const res = await fetch('/api/counterstrike/hltv/matches');
-        const data = await res.json();
-        if (data.ok) {
-          setMatches(data.matches.slice(0, 5)); // Show only top 5
-        } else {
-          setError(data.error);
-        }
-      } catch (e: any) {
-        setError(e.message);
-      } finally {
-        setLoading(false);
+  async function fetchMatches() {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/counterstrike/hltv/matches');
+      const data = await res.json();
+      if (data.ok) {
+        setMatches(data.matches.slice(0, 5)); // Show only top 5
+      } else {
+        setError(data.error);
       }
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
     }
-    fetchMatches();
-  }, []);
+  }
 
   if (loading) {
     return (
       <div className="premium-card p-6 bg-white border-slate-200 shadow-sm animate-pulse">
-        <div className="h-4 w-32 bg-slate-50 rounded mb-4" />
-        <div className="space-y-4">
-          {[1, 2, 3].map(i => <div key={i} className="h-16 bg-slate-50/50 rounded-2xl" />)}
+        <div className="flex items-center gap-3">
+          <Loader2 className="h-5 w-5 animate-spin text-indigo-600" />
+          <div className="text-xs font-black uppercase tracking-widest text-slate-500">Загрузка HLTV по запросу...</div>
         </div>
       </div>
     );
@@ -98,18 +98,33 @@ export default function HltvMatchesWidget() {
             </p>
           </div>
         ) : matches.length === 0 ? (
-          <div className="p-8 text-center text-sm font-bold text-slate-400">Нет матчей в HLTV</div>
+          <div className="p-8 text-center">
+            <button
+              onClick={fetchMatches}
+              className="rounded-xl border border-dashed border-slate-300 bg-white px-4 py-3 text-[10px] font-black uppercase tracking-widest text-indigo-600 hover:border-indigo-300 hover:bg-indigo-50/30 transition-all"
+            >
+              Нажмите, чтобы загрузить
+            </button>
+            <p className="mt-4 text-[9px] font-black uppercase tracking-widest text-slate-400">HLTV данные загружаются только по запросу</p>
+          </div>
         ) : (
           <ul className="divide-y divide-slate-100">
             {matches.map((m) => (
               <li key={m.id} className="p-4 hover:bg-slate-50 transition-colors group">
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-[8px] font-black uppercase tracking-widest text-slate-400 truncate max-w-[150px]">
-                    {m.tournament}
-                  </span>
+                  <div className="flex items-center gap-2 min-w-0">
+                    {m.isLive && (
+                      <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-rose-500 text-[7px] font-black text-white uppercase animate-pulse">
+                        <Zap className="w-2 h-2 fill-white" /> Live
+                      </span>
+                    )}
+                    <span className="text-[8px] font-black uppercase tracking-widest text-slate-400 truncate max-w-[120px]">
+                      {m.tournament}
+                    </span>
+                  </div>
                   <span className="text-[9px] font-bold text-slate-900 tabular-nums flex items-center gap-1 shrink-0">
                     <Clock className="w-3 h-3 text-slate-300" />
-                    {m.date.split(' ')[1]}
+                    {m.isLive ? "LIVE" : m.date.split(' ')[1]}
                   </span>
                 </div>
                 

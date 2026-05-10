@@ -4,6 +4,7 @@ import { getOrCreateDota2Discipline } from "@/lib/disciplines";
 import { makeLiquipediaPageUrl } from "@/lib/liquipedia/client";
 import { normalizeDota2Tournament } from "@/lib/normalizers/dota2Tournament";
 import { importTournamentRecursive } from "@/lib/liquipedia/importer";
+import { dedupeTournamentMatches } from "@/lib/matches/dedupe";
 
 export const dynamic = "force-dynamic";
 
@@ -41,7 +42,7 @@ export async function POST(request: Request) {
   try {
     const apiUrl = discipline.baseApiUrl ?? "https://liquipedia.net/dota2/api.php";
     
-    const { tournament, normalized } = await importTournamentRecursive({
+    const importResult = await importTournamentRecursive({
       disciplineId: discipline.id,
       disciplineSlug: "dota2",
       apiUrl,
@@ -52,6 +53,7 @@ export async function POST(request: Request) {
       importRecordId: tournamentImport.id,
       force: body.force
     });
+    const { tournament, normalized } = importResult;
 
     await prisma.tournamentImport.update({
       where: { id: tournamentImport.id },
@@ -71,7 +73,17 @@ export async function POST(request: Request) {
       await ensureTeamMappingsForTournament(fullTournament.id, "dota2");
     }
 
-    return NextResponse.json({ tournament: fullTournament, normalized });
+    return NextResponse.json({
+      tournament: fullTournament ? { ...fullTournament, matches: dedupeTournamentMatches(fullTournament.matches) } : null,
+      normalized,
+      cacheHit: importResult.cacheHit,
+      cacheLayer: importResult.cacheLayer,
+      stale: importResult.stale,
+      warning: importResult.warning,
+      qualityScore: importResult.qualityScore,
+      requestStats: importResult.requestStats,
+      sourceBreakdown: importResult.sourceBreakdown,
+    });
   } catch (error) {
     console.error(error);
     await prisma.tournamentImport.update({

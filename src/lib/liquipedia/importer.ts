@@ -145,7 +145,7 @@ export async function importTournamentRecursive(params: {
       console.log(`[Importer] Removed ${allMatches.length - deduplicatedMatches.length} duplicate matches before insert.`);
     }
 
-    qualityGateKeptPrevious = shouldKeepPreviousMatches({
+    qualityGateKeptPrevious = !force && shouldKeepPreviousMatches({
       newMatches: deduplicatedMatches,
       previousMatches: existingBeforeFinal,
       newQualityScore: qualityScore,
@@ -168,7 +168,7 @@ export async function importTournamentRecursive(params: {
       });
     }
   } else {
-    qualityGateKeptPrevious = shouldKeepPreviousMatches({
+    qualityGateKeptPrevious = !force && shouldKeepPreviousMatches({
       newMatches: [],
       previousMatches: existingBeforeFinal,
       newQualityScore: qualityScore,
@@ -366,8 +366,8 @@ async function processSinglePage(params: {
           externalRequests,
         });
 
-        sourceCache = sourceCache || await findSourceFetchCache(cacheInput);
-        if (sourceCache?.rawSnapshotId && isSourceCacheStaleUsable(sourceCache)) {
+        sourceCache = sourceCache || (!force ? await findSourceFetchCache(cacheInput) : null);
+        if (!force && sourceCache?.rawSnapshotId && isSourceCacheStaleUsable(sourceCache)) {
           const staleSnapshot = await prisma.rawSnapshot.findUnique({ where: { id: sourceCache.rawSnapshotId } });
           if (staleSnapshot?.rawWikitext) {
             rawSnapshot = staleSnapshot;
@@ -396,7 +396,7 @@ async function processSinglePage(params: {
             orderBy: { fetchedAt: "desc" }
           });
 
-          if (fallbackSnapshot?.rawWikitext) {
+          if (!force && fallbackSnapshot?.rawWikitext) {
             rawSnapshot = fallbackSnapshot;
             wikitext = fallbackSnapshot.rawWikitext;
             pageTitle = fallbackSnapshot.pageTitle;
@@ -505,7 +505,11 @@ async function processSinglePage(params: {
         where: { tournamentId: tournament.id },
         select: { name: true, platformId: true }
       });
-      const partPlatformMap = new Map(existingParticipants.filter((ep: any) => ep.platformId).map((ep: any) => [ep.name.toLowerCase(), ep.platformId]));
+      const partPlatformMap = new Map(
+        force
+          ? []
+          : existingParticipants.filter((ep: any) => ep.platformId).map((ep: any) => [ep.name.toLowerCase(), ep.platformId])
+      );
 
       const participantsToInsert = normalized.participants.map((p: any) => {
         const mapping = mappingMap.get(p.name.toLowerCase()) || aliasMap.get(p.name.toLowerCase());
@@ -524,13 +528,15 @@ async function processSinglePage(params: {
         };
       });
 
-      if (participantsToInsert.length > 0) {
-        if (clearMatches !== false) {
-          await prisma.$transaction([
-            prisma.tournamentParticipant.deleteMany({ where: { tournamentId: tournament.id } }),
-            prisma.tournamentParticipant.createMany({ data: participantsToInsert, skipDuplicates: true })
-          ]);
-        } else {
+      if (clearMatches !== false) {
+        await prisma.$transaction([
+          prisma.tournamentParticipant.deleteMany({ where: { tournamentId: tournament.id } }),
+          ...(participantsToInsert.length > 0
+            ? [prisma.tournamentParticipant.createMany({ data: participantsToInsert, skipDuplicates: true })]
+            : [])
+        ]);
+      } else {
+        if (participantsToInsert.length > 0) {
           await prisma.tournamentParticipant.createMany({ data: participantsToInsert, skipDuplicates: true });
         }
       }
@@ -545,16 +551,20 @@ async function processSinglePage(params: {
           }).catch(() => {});
         }
       }
+    } else if (clearMatches !== false) {
+      await prisma.tournamentParticipant.deleteMany({ where: { tournamentId: tournament.id } });
     }
 
     let matchesToInsert: any[] = [];
     // Bulk prepare matches
     if (normalized.matches.length > 0) {
       // 1. Fetch existing platform mappings to preserve them
-      const existingMatches = await prisma.tournamentMatch.findMany({
-        where: { tournamentId: tournament.id },
-        select: { matchId: true, platformId: true, lpNumericalId: true, teamAName: true, teamBName: true, matchDate: true }
-      });
+      const existingMatches = force
+        ? []
+        : await prisma.tournamentMatch.findMany({
+            where: { tournamentId: tournament.id },
+            select: { matchId: true, platformId: true, lpNumericalId: true, teamAName: true, teamBName: true, matchDate: true }
+          });
       const matchPlatformMap = new Map(existingMatches.filter((em: any) => em.platformId).map((em: any) => [em.matchId, em.platformId]));
       const lpIdMap = new Map(existingMatches.filter((em: any) => em.lpNumericalId).map((em: any) => [em.matchId, em.lpNumericalId]));
       

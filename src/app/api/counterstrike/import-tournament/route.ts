@@ -117,10 +117,12 @@ export async function POST(request: Request) {
         }
 
         const [existingParticipants, teamMappings] = await Promise.all([
-          prisma.tournamentParticipant.findMany({
-            where: { tournamentId: tournament.id },
-            select: { name: true, platformId: true, logoUrl: true, rawText: true }
-          }),
+          body.force
+            ? Promise.resolve([])
+            : prisma.tournamentParticipant.findMany({
+                where: { tournamentId: tournament.id },
+                select: { name: true, platformId: true, logoUrl: true, rawText: true }
+              }),
           prisma.teamMapping.findMany({
             where: { disciplineSlug: "counterstrike" }
           })
@@ -155,13 +157,25 @@ export async function POST(request: Request) {
         // Replace HLTV participants with the latest event teams. Old bad OCR aliases
         // like "G" for "G2" must not remain forever in the mapping UI.
         try {
-          await prisma.$transaction([
-            ...matchUpserts,
+          const participantRefresh = [
             prisma.tournamentParticipant.deleteMany({ where: { tournamentId: tournament.id } }),
             ...(participantsToInsert.length > 0
               ? [prisma.tournamentParticipant.createMany({ data: participantsToInsert })]
               : [])
-          ]);
+          ];
+
+          if (body.force) {
+            await prisma.$transaction([
+              prisma.tournamentMatch.deleteMany({ where: { tournamentId: tournament.id } }),
+              ...participantRefresh,
+              ...matchUpserts
+            ]);
+          } else {
+            await prisma.$transaction([
+              ...matchUpserts,
+              ...participantRefresh
+            ]);
+          }
         } catch (e) {
           console.error(`[HLTV Import] Database batch save error:`, e);
           throw new Error("Ошибка при сохранении матчей в базу данных.");

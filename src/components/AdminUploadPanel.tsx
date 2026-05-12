@@ -29,7 +29,6 @@ interface PreviewData {
   warnings: string[];
 }
 
-
 export default function AdminUploadPanel({ 
   tournamentId, 
   disciplineSlug,
@@ -51,6 +50,37 @@ export default function AdminUploadPanel({
   const [lastSavedId, setLastSavedId] = useState<string | null>(null);
   const [result, setResult] = useState<{ type: 'success' | 'error' | 'info'; text: string; raw?: string } | null>(null);
 
+  const loadAdminData = useCallback(async () => {
+    const [mappingRes, settingsRes] = await Promise.all([
+      fetch(`/api/${disciplineSlug}/tournament/${tournamentId}/admin-mapping`, {
+        cache: 'no-store',
+        credentials: 'same-origin',
+      }),
+      fetch(`/api/admin-settings/${disciplineSlug}`, {
+        cache: 'no-store',
+        credentials: 'same-origin',
+      })
+    ]);
+
+    const mappingData = await mappingRes.json();
+    const settingsData = await settingsRes.json();
+
+    if (!mappingRes.ok || !settingsRes.ok) {
+      setResult({
+        type: 'error',
+        text: mappingData?.error || settingsData?.error || 'Ошибка загрузки данных админки',
+      });
+      return;
+    }
+
+    setMapping({
+      adminShapkaId: mappingData.adminShapkaId || '',
+      adminShapkaName: mappingData.adminShapkaName || '',
+    });
+    setLastSavedId(mappingData.adminShapkaId || '');
+    setSettings(settingsData);
+  }, [disciplineSlug, tournamentId]);
+
   const handlePreview = useCallback(async () => {
     setActionLoading(true);
     setResult(null);
@@ -58,6 +88,7 @@ export default function AdminUploadPanel({
       const res = await fetch(`/api/${disciplineSlug}/tournament/${tournamentId}/admin-fixt-preview`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
         body: JSON.stringify({ disciplineSlug, selectedMatchIds }),
       });
       const data = await res.json();
@@ -76,20 +107,7 @@ export default function AdminUploadPanel({
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [mappingRes, settingsRes] = await Promise.all([
-          fetch(`/api/${disciplineSlug}/tournament/${tournamentId}/admin-mapping`, { cache: 'no-store' }),
-          fetch(`/api/admin-settings/${disciplineSlug}`, { cache: 'no-store' })
-        ]);
-        
-        const mappingData = await mappingRes.json();
-        const settingsData = await settingsRes.json();
-        
-        setMapping({
-          adminShapkaId: mappingData.adminShapkaId || '',
-          adminShapkaName: mappingData.adminShapkaName || '',
-        });
-        setLastSavedId(mappingData.adminShapkaId || '');
-        setSettings(settingsData);
+        await loadAdminData();
       } catch (e) {
         console.error('Failed to fetch admin data', e);
       } finally {
@@ -98,7 +116,7 @@ export default function AdminUploadPanel({
     };
     fetchData();
 
-  }, [tournamentId, disciplineSlug]);
+  }, [loadAdminData]);
 
   useEffect(() => {
     const handleTrigger = () => handlePreview();
@@ -113,6 +131,7 @@ export default function AdminUploadPanel({
       const res = await fetch(`/api/${disciplineSlug}/tournament/${tournamentId}/admin-mapping`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
         body: JSON.stringify({
           ...mapping,
           disciplineSlug,
@@ -123,6 +142,7 @@ export default function AdminUploadPanel({
         setLastSavedId(mapping.adminShapkaId);
         setIsEditing(false);
         setPreview(null);
+        setResult({ type: 'success', text: 'ID шапки сохранён.' });
         dispatchAdminMappingUpdated({ tournamentId, disciplineSlug });
         router.refresh();
       } else {
@@ -136,14 +156,15 @@ export default function AdminUploadPanel({
     }
   }, [disciplineSlug, router, tournamentId, mapping, tournamentName]);
 
-  const handleSend = async () => {
-    if (!confirm('Залить данные в API?')) return;
+  async function handleSend(confirmed = false) {
+    if (!confirmed && !confirm('Залить данные в API?')) return;
     setActionLoading(true);
     setResult(null);
     try {
       const res = await fetch(`/api/${disciplineSlug}/tournament/${tournamentId}/admin-fixt-send`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
         body: JSON.stringify({ disciplineSlug, selectedMatchIds }),
       });
       const data = await res.json();
@@ -172,7 +193,7 @@ export default function AdminUploadPanel({
     } finally {
       setActionLoading(false);
     }
-  };
+  }
 
   if (loading) return <div className="p-4 text-slate-400 font-normal animate-pulse">Загрузка данных админки...</div>;
 
@@ -207,7 +228,7 @@ export default function AdminUploadPanel({
             </div>
           </div>
         </div>
-        
+
         <div className="space-y-6">
           {/* Shapka ID Input */}
           <div className="space-y-3">
@@ -265,7 +286,7 @@ export default function AdminUploadPanel({
               {actionLoading ? "Проверяю..." : `Проверить ${selectedCount || ""}`}
             </button>
             <button
-              onClick={handleSend}
+              onClick={() => handleSend()}
               disabled={actionLoading || Boolean(sendDisabledReason)}
               title={sendDisabledReason ?? `Будет отправлено матчей: ${readyCount}`}
               className="min-h-[54px] rounded-lg bg-slate-950 px-4 text-sm font-black uppercase tracking-widest text-white transition-colors hover:bg-indigo-600 disabled:bg-slate-100 disabled:text-slate-400"

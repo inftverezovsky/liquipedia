@@ -1,8 +1,12 @@
 import { expect, test } from "@playwright/test";
 
 test("admin auth protects settings endpoints and creates a usable session cookie", async ({ request }) => {
-  const unauthenticated = await request.post("/api/settings/clear-search-cache");
+  const unauthenticated = await request.get("/api/settings/global");
   expect(unauthenticated.status()).toBe(401);
+
+  const publicCacheClear = await request.post("/api/settings/clear-search-cache");
+  await expect(publicCacheClear).toBeOK();
+  await expect(await publicCacheClear.json()).toMatchObject({ ok: true });
 
   const badLogin = await request.post("/api/admin-auth/login", {
     data: { password: "wrong-password" },
@@ -24,9 +28,8 @@ test("admin auth protects settings endpoints and creates a usable session cookie
   await expect(session).toBeOK();
   await expect(await session.json()).toMatchObject({ authenticated: true });
 
-  const clearCache = await request.post("/api/settings/clear-search-cache", {
+  const settings = await request.get("/api/settings/global", {
     headers: { cookie },
   });
-  await expect(clearCache).toBeOK();
-  await expect(await clearCache.json()).toMatchObject({ ok: true });
+  await expect(settings).toBeOK();
 });

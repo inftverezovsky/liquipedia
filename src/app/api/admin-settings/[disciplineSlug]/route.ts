@@ -7,12 +7,10 @@ import { requireAdmin } from '@/lib/adminAuth';
 export const dynamic = "force-dynamic";
 
 export async function GET(
-  request: Request,
+  _request: Request,
   { params }: { params: Promise<{ disciplineSlug: string }> }
 ) {
   const { disciplineSlug } = await params;
-  const unauthorized = await requireAdmin(request);
-  if (unauthorized) return unauthorized;
 
   try {
     const settings = await resolveAdminSettings(disciplineSlug);

@@ -24,12 +24,6 @@ type MappingNotice = {
   text: string;
 };
 
-type PendingMappingAction =
-  | { type: "save"; name: string }
-  | { type: "delete"; name: string; confirmed?: boolean }
-  | { type: "autoSingle"; name: string }
-  | { type: "autoAll"; confirmed?: boolean };
-
 export default function TeamMappingPanel({
   teamNames,
   initialMappings,
@@ -47,63 +41,10 @@ export default function TeamMappingPanel({
   const [saving, setSaving] = useState<string | null>(null);
   const [globalLoading, setGlobalLoading] = useState(false);
   const [notice, setNotice] = useState<MappingNotice | null>(null);
-  const [authRequired, setAuthRequired] = useState(false);
-  const [adminPassword, setAdminPassword] = useState("");
-  const [authLoading, setAuthLoading] = useState(false);
-  const [pendingAction, setPendingAction] = useState<PendingMappingAction | null>(null);
 
   useEffect(() => {
     setMappings(buildMappingState(teamNames, initialMappings));
   }, [teamNames, initialMappings]);
-
-  async function runPendingAction(action: PendingMappingAction) {
-    if (action.type === "save") return handleSave(action.name);
-    if (action.type === "delete") return handleDelete(action.name, action.confirmed);
-    if (action.type === "autoSingle") return handleAutoMapSingle(action.name);
-    return handleAutoMapAll(action.confirmed);
-  }
-
-  function requireLogin(action: PendingMappingAction) {
-    setPendingAction(action);
-    setAuthRequired(true);
-    setNotice({
-      type: "error",
-      text: "Сессия администратора истекла или открыта с другого адреса. Введите пароль и действие повторится автоматически.",
-    });
-  }
-
-  async function handleAdminLogin() {
-    setAuthLoading(true);
-    setNotice(null);
-
-    try {
-      const response = await fetch("/api/admin-auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "same-origin",
-        body: JSON.stringify({ password: adminPassword }),
-      });
-
-      if (!response.ok) {
-        setNotice({ type: "error", text: "Неверный административный пароль." });
-        return;
-      }
-
-      setAdminPassword("");
-      setAuthRequired(false);
-      const action = pendingAction;
-      setPendingAction(null);
-      setNotice({ type: "success", text: "Доступ подтверждён. Повторяю действие..." });
-
-      if (action) {
-        await runPendingAction(action);
-      }
-    } catch {
-      setNotice({ type: "error", text: "Не удалось выполнить вход администратора." });
-    } finally {
-      setAuthLoading(false);
-    }
-  }
 
   async function handleSave(name: string) {
     setSaving(name);
@@ -126,10 +67,6 @@ export default function TeamMappingPanel({
         })
       });
       const data = await res.json();
-      if (res.status === 401) {
-        requireLogin({ type: "save", name });
-        return;
-      }
       if (!res.ok) {
         setNotice({ type: "error", text: data.error || "Ошибка сохранения маппинга" });
         return;
@@ -158,10 +95,6 @@ export default function TeamMappingPanel({
         credentials: "same-origin"
       });
       const data = await res.json();
-      if (res.status === 401) {
-        requireLogin({ type: "delete", name, confirmed: true });
-        return;
-      }
       if (!res.ok) {
         setNotice({ type: "error", text: data.error || "Ошибка удаления маппинга" });
         return;
@@ -200,10 +133,6 @@ export default function TeamMappingPanel({
         body: JSON.stringify({ disciplineSlug, liquipediaName: name })
       });
       const data = await res.json();
-      if (res.status === 401) {
-        requireLogin({ type: "autoSingle", name });
-        return;
-      }
       if (!res.ok) {
         setNotice({ type: "error", text: data.error || "Ошибка авто-маппинга" });
         return;
@@ -238,10 +167,6 @@ export default function TeamMappingPanel({
         body: JSON.stringify({ disciplineSlug })
       });
       const data = await res.json();
-      if (res.status === 401) {
-        requireLogin({ type: "autoAll", confirmed: true });
-        return;
-      }
       if (!res.ok) {
         setNotice({ type: "error", text: data.error || "Ошибка авто-маппинга" });
         return;
@@ -267,7 +192,7 @@ export default function TeamMappingPanel({
 
   return (
     <div className="flex flex-col gap-6">
-      {(notice || authRequired) && (
+      {notice && (
         <div
           className={`rounded-2xl border p-4 ${
             notice?.type === "success"
@@ -277,28 +202,7 @@ export default function TeamMappingPanel({
                 : "border-rose-100 bg-rose-50 text-rose-700"
           }`}
         >
-          {notice && <p className="text-sm font-bold">{notice.text}</p>}
-
-          {authRequired && (
-            <div className="mt-4 flex flex-col gap-3 sm:flex-row">
-              <input
-                type="password"
-                value={adminPassword}
-                onChange={(event) => setAdminPassword(event.target.value)}
-                onKeyDown={(event) => event.key === "Enter" && handleAdminLogin()}
-                placeholder="Административный пароль"
-                className="min-w-0 flex-1 rounded-xl border border-rose-200 bg-white px-4 py-2 text-sm font-bold text-slate-900 outline-none focus:border-rose-400"
-              />
-              <button
-                type="button"
-                onClick={handleAdminLogin}
-                disabled={authLoading || adminPassword.trim().length === 0}
-                className="rounded-xl bg-slate-950 px-5 py-2 text-xs font-black uppercase tracking-widest text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {authLoading ? "Проверка..." : "Войти и повторить"}
-              </button>
-            </div>
-          )}
+          <p className="text-sm font-bold">{notice.text}</p>
         </div>
       )}
 

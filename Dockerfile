@@ -40,7 +40,7 @@ RUN apt-get update -y && \
     npx playwright install --with-deps chromium && \
     rm -rf /var/lib/apt/lists/*
 
-# Expose the local app port. Railway still injects PORT at runtime.
+# Expose the app port used by Docker hosting and local compose.
 EXPOSE 3010
 
 # Command to run on start

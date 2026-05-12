@@ -60,17 +60,17 @@ http://localhost:3010
 
 *Примечание: Onyx может продолжать работать на порту 3000, конфликтов не будет.*
 
-## Деплой на Railway
+## Деплой на Docker-хостинг
 
-Проект готов к деплою на [Railway](https://railway.app/).
+Проект готов к деплою через `Dockerfile`. `railway.json` больше не используется.
 
 ### Шаги для деплоя:
-1. Создайте новый проект в Railway.
-2. Добавьте сервис **Database -> Add PostgreSQL**.
-3. Добавьте сервис **GitHub Repo** (подключите этот репозиторий).
-4. Railway автоматически обнаружит `Dockerfile` и `railway.json`.
-5. В настройках **Variables** сервиса `web` убедитесь, что `DATABASE_URL` подтянулся автоматически (или пропишите его вручную из настроек PostgreSQL).
-6. Добавьте переменную `LIQUIPEDIA_USER_AGENT`.
+1. Подключите GitHub-репозиторий к Docker-хостингу.
+2. Укажите сборку из `Dockerfile`.
+3. Подключите PostgreSQL и задайте переменную `DATABASE_URL`.
+4. Добавьте `LIQUIPEDIA_USER_AGENT` с рабочими контактами.
+5. Добавьте `ADMIN_PASSWORD` и стабильный `ADMIN_SESSION_SECRET`.
+6. Если используется внешний API заливки, задайте нужные настройки во вкладке `API` после деплоя.
 
 Проект выполняет `prisma migrate deploy` при старте контейнера. Seed запускайте отдельно командой `npm run db:seed`, чтобы рестарт приложения не перезаписывал настройки.
 
@@ -184,8 +184,8 @@ npx prisma migrate resolve --applied 20260510160000_init
   ADMIN_MTLS_KEY_PATH=./certs/client.key
   ADMIN_MTLS_CA_PATH=./certs/ca.crt
   ```
-- **Для Railway (Base64)**:
-  Если файлы нельзя загрузить, используйте Base64 версию:
+- **Для Docker-хостинга без volume**:
+  Если файлы нельзя загрузить как volume, используйте Base64 версию:
   ```env
   ADMIN_MTLS_PFX_BASE64=base64_content_of_pfx_file
   ```

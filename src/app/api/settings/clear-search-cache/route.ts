@@ -1,12 +1,8 @@
 import { NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
-import { requireAdmin } from "@/lib/adminAuth";
 
-export async function POST(request: Request) {
-  const unauthorized = await requireAdmin(request);
-  if (unauthorized) return unauthorized;
-
+export async function POST() {
   try {
     const hltvCache = path.join(process.cwd(), "cache", "hltv");
     const liquipediaCache = path.join(process.cwd(), "cache", "liquipedia");

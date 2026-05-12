@@ -1,14 +1,11 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-import { requireAdmin } from '@/lib/adminAuth';
 
 export async function GET(
-  request: Request,
+  _request: Request,
   { params }: { params: Promise<{ id: string; disciplineSlug: string }> }
 ) {
   const { id } = await params;
-  const unauthorized = await requireAdmin(request);
-  if (unauthorized) return unauthorized;
 
   try {
     const mapping = await prisma.tournamentAdminMapping.findUnique({
@@ -26,8 +23,6 @@ export async function POST(
   { params }: { params: Promise<{ id: string; disciplineSlug: string }> }
 ) {
   const { disciplineSlug: routeDisciplineSlug, id } = await params;
-  const unauthorized = await requireAdmin(request);
-  if (unauthorized) return unauthorized;
 
   try {
     const body = await request.json();

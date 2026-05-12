@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { normalizeTeamName } from "@/lib/teams";
 import { runAutoMappingForDiscipline } from "@/lib/teams/mapping";
+import { queueIdentitySync } from "@/lib/identitySync";
 import levenshtein from "fast-levenshtein";
 
 export const dynamic = "force-dynamic";
@@ -88,11 +89,13 @@ export async function POST(request: Request) {
       data: dataToUpdate
     });
 
-    return NextResponse.json({ success: true, mapping: updated });
+    const identitySync = queueIdentitySync(`team-mapping:auto:${disciplineSlug}`);
+    return NextResponse.json({ success: true, mapping: updated, identitySync });
 
   } else {
     // Run for all unmapped
     const result = await runAutoMappingForDiscipline(disciplineSlug);
-    return NextResponse.json({ success: true, result });
+    const identitySync = queueIdentitySync(`team-mapping:auto:${disciplineSlug}`);
+    return NextResponse.json({ success: true, result, identitySync });
   }
 }

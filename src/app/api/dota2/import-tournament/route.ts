@@ -5,6 +5,7 @@ import { makeLiquipediaPageUrl } from "@/lib/liquipedia/client";
 import { normalizeDota2Tournament } from "@/lib/normalizers/dota2Tournament";
 import { importTournamentRecursive } from "@/lib/liquipedia/importer";
 import { dedupeTournamentMatches } from "@/lib/matches/dedupe";
+import { queueIdentitySync } from "@/lib/identitySync";
 
 export const dynamic = "force-dynamic";
 
@@ -73,6 +74,8 @@ export async function POST(request: Request) {
       await ensureTeamMappingsForTournament(fullTournament.id, "dota2");
     }
 
+    const identitySync = queueIdentitySync("dota2:import-tournament");
+
     return NextResponse.json({
       tournament: fullTournament ? { ...fullTournament, matches: dedupeTournamentMatches(fullTournament.matches) } : null,
       normalized,
@@ -84,6 +87,7 @@ export async function POST(request: Request) {
       requestStats: importResult.requestStats,
       sourceBreakdown: importResult.sourceBreakdown,
       forceCleanupStats: importResult.forceCleanupStats,
+      identitySync,
     });
   } catch (error) {
     console.error(error);

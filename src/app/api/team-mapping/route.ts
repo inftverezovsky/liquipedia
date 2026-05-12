@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { queueIdentitySync } from "@/lib/identitySync";
 
 export const dynamic = "force-dynamic";
 
@@ -82,7 +83,8 @@ export async function POST(request: Request) {
     }
   });
 
-  return NextResponse.json({ mapping });
+  const identitySync = queueIdentitySync("team-mapping:upsert");
+  return NextResponse.json({ mapping, identitySync });
 }
 
 export async function DELETE(request: Request) {
@@ -129,5 +131,6 @@ export async function DELETE(request: Request) {
     }
   });
 
-  return NextResponse.json({ success: true });
+  const identitySync = queueIdentitySync("team-mapping:delete");
+  return NextResponse.json({ success: true, identitySync });
 }

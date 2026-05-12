@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/db';
+import { findTournamentAdminMapping, upsertTournamentAdminMapping } from '@/lib/adminUpload/adminMappingStore';
+import { queueIdentitySync } from '@/lib/identitySync';
 
 export async function GET(
   _request: Request,
@@ -8,9 +9,7 @@ export async function GET(
   const { id } = await params;
 
   try {
-    const mapping = await prisma.tournamentAdminMapping.findUnique({
-      where: { tournamentId: id },
-    });
+    const mapping = await findTournamentAdminMapping(id);
 
     return NextResponse.json(mapping || { tournamentId: id });
   } catch (error: any) {
@@ -29,22 +28,16 @@ export async function POST(
     const { adminShapkaId, adminShapkaName, sourceTournamentName } = body;
     const disciplineSlug = body.disciplineSlug || routeDisciplineSlug;
 
-    const mapping = await prisma.tournamentAdminMapping.upsert({
-      where: { tournamentId: id },
-      update: {
-        adminShapkaId: adminShapkaId?.toString(),
-        adminShapkaName,
-      },
-      create: {
-        tournamentId: id,
-        disciplineSlug,
-        sourceTournamentName,
-        adminShapkaId: adminShapkaId?.toString(),
-        adminShapkaName,
-      },
+    const mapping = await upsertTournamentAdminMapping({
+      tournamentId: id,
+      disciplineSlug,
+      sourceTournamentName,
+      adminShapkaId,
+      adminShapkaName,
     });
 
-    return NextResponse.json(mapping);
+    const identitySync = queueIdentitySync(`admin-mapping:${disciplineSlug}`);
+    return NextResponse.json({ ...mapping, identitySync });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }

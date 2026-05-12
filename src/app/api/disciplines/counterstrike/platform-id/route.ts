@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getOrCreateCounterStrikeDiscipline } from "@/lib/disciplines";
+import { queueIdentitySync } from "@/lib/identitySync";
 
 export async function GET() {
   try {
@@ -21,7 +22,8 @@ export async function POST(req: Request) {
       data: { platformId: platformId || null }
     });
     
-    return NextResponse.json({ success: true });
+    const identitySync = queueIdentitySync("discipline-platform-id:counterstrike");
+    return NextResponse.json({ success: true, identitySync });
   } catch (error) {
     console.error(error);
     return NextResponse.json({ error: "Failed to update discipline" }, { status: 500 });

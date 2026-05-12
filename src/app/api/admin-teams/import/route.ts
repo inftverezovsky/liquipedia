@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { normalizeTeamName } from "@/lib/teams";
 import levenshtein from "fast-levenshtein";
 import { requireAdmin } from "@/lib/adminAuth";
+import { queueIdentitySync } from "@/lib/identitySync";
 
 const MAX_IMPORT_BYTES = 10 * 1024 * 1024;
 const REMOTE_FETCH_TIMEOUT_MS = 15000;
@@ -215,10 +216,13 @@ export async function POST(request: Request) {
     // Run auto-mapping after import
     const mappingResult = await runAutoMapping(disciplineSlug);
 
+    const identitySync = queueIdentitySync(`admin-teams:import:${disciplineSlug}`);
+
     return NextResponse.json({
       success: true,
       importedCount,
       mappingResult,
+      identitySync,
     });
   } catch (error: any) {
     console.error("Import error:", error);

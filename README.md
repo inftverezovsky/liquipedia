@@ -74,6 +74,39 @@ http://localhost:3010
 
 Проект выполняет `prisma migrate deploy` при старте контейнера. Seed запускайте отдельно командой `npm run db:seed`, чтобы рестарт приложения не перезаписывал настройки.
 
+## Сохранение и синхронизация ID
+
+Все привязанные ID хранятся в PostgreSQL, а не в git. Поэтому при redeploy важно использовать постоянную БД:
+
+- на Docker Compose уже настроен named volume `tcyber_postgres_data`;
+- на Docker-хостинге переменная `DATABASE_URL` должна вести в постоянный PostgreSQL, а не во временную базу контейнера;
+- не запускайте seed автоматически при каждом старте, чтобы не перезаписывать рабочие настройки.
+
+Для синхронизации локальной и серверной базы добавлен identity sync:
+
+- `TeamMapping`: ID команд, alias, canonical name, статус ручного/авто-маппинга;
+- `TournamentAdminMapping`: ID шапки турнира;
+- `Discipline.platformId` и настройки админ-заливки `adminSportId`, `adminMax`, `defaultShapkaId`;
+- `Tournament.platformId` и сохраненные `platformId` участников.
+
+Endpoint:
+
+```text
+GET  /api/admin-settings/identity-sync
+POST /api/admin-settings/identity-sync
+```
+
+Для автоматической синхронизации задайте одинаковый токен на обоих инстансах:
+
+```env
+TCYBER_INSTANCE_ID=server
+TCYBER_SYNC_PEER_URL=https://your-other-instance.example
+TCYBER_SYNC_TOKEN=long-random-shared-token
+TCYBER_SYNC_TIMEOUT_MS=60000
+```
+
+После сохранения ID команды, ID шапки, platformId дисциплины/турнира или после авто-маппинга приложение отправит snapshot на `TCYBER_SYNC_PEER_URL` в фоне. Если нужна двусторонняя синхронизация, оба инстанса должны иметь доступ друг к другу или должны использовать одну общую PostgreSQL базу.
+
 ## Обязательно поправить `.env`
 
 Перед реальным использованием измени:

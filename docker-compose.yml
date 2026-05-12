@@ -26,6 +26,10 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-63016}
       ADMIN_SESSION_SECRET: ${ADMIN_SESSION_SECRET:-tcyber-admin-session-secret}
       ADMIN_COOKIE_SECURE: ${ADMIN_COOKIE_SECURE:-false}
+      TCYBER_INSTANCE_ID: ${TCYBER_INSTANCE_ID:-docker-local}
+      TCYBER_SYNC_PEER_URL: ${TCYBER_SYNC_PEER_URL:-}
+      TCYBER_SYNC_TOKEN: ${TCYBER_SYNC_TOKEN:-}
+      TCYBER_SYNC_TIMEOUT_MS: ${TCYBER_SYNC_TIMEOUT_MS:-60000}
       PORT: 3010
     volumes:
       - ./certs:/app/certs:ro

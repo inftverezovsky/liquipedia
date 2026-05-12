@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { queueIdentitySync } from "@/lib/identitySync";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +15,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       data: { platformId: platformId || null }
     });
 
-    return NextResponse.json({ tournament });
+    const identitySync = queueIdentitySync("tournament-platform-id:dota2");
+    return NextResponse.json({ tournament, identitySync });
   } catch (error) {
     console.error(error);
     return NextResponse.json({ error: "Failed to save platformId" }, { status: 500 });

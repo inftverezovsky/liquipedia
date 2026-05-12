@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db';
 import { getAdminAuthConfigStatus } from '@/lib/adminUpload/adminHttpClient';
 import { resolveAdminSettings } from '@/lib/adminUpload/resolveAdminSettings';
 import { requireAdmin } from '@/lib/adminAuth';
+import { queueIdentitySync } from '@/lib/identitySync';
 
 export const dynamic = "force-dynamic";
 
@@ -74,7 +75,8 @@ export async function POST(
       },
     });
 
-    return NextResponse.json(settings);
+    const identitySync = queueIdentitySync(`admin-settings:${disciplineSlug}`);
+    return NextResponse.json({ ...settings, identitySync });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }

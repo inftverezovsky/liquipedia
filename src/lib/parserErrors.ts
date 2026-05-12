@@ -53,6 +53,10 @@ export function classifyParserError(input: ParserErrorInput): ParserErrorClass {
     return "proxy_tunnel";
   }
 
+  if (/chrome-error:\/\/chromewebdata|ERR_PROXY|ERR_SOCKS|ERR_CONNECTION_CLOSED|ERR_CONNECTION_RESET/i.test(message)) {
+    return "proxy_tunnel";
+  }
+
   if (
     /cloudflare|cf-ray|challenge|captcha|attention required|checking your browser|ddos-guard|turnstile/i.test(message) ||
     statusCode === 403 ||

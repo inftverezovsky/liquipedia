@@ -13,7 +13,7 @@ const MODE = args.mode || 'scrape'; // 'scrape', 'search', or 'event'
 const QUERY = args.q || '';
 const EVENT_ID = args.id || '';
 const REQUEST_ID = String(args['request-id'] || args.requestId || crypto.randomBytes(4).toString('hex'));
-const NO_CACHE = Boolean(args.no_cache || args['no-cache']);
+const NO_CACHE = Boolean(args.no_cache || args.noCache || args['no-cache'] || args.cache === false);
 
 const CACHE_DIR = './cache/hltv';
 const CACHE_VERSION = 'hltv-upcoming-only-v2';
@@ -168,19 +168,9 @@ async function scrapeHltv() {
     if (MODE === 'search') {
       console.error(`[HLTV Playwright] Searching for: ${QUERY}`);
       
-      // Navigate to search page directly with a more patient wait
-      try {
-        await page.goto(`https://www.hltv.org/search?query=${encodeURIComponent(QUERY)}`, { 
-          waitUntil: 'networkidle', // Wait for more elements to load
-          timeout: 60000 
-        });
-      } catch (e) {
-        console.error(`[HLTV Playwright] Initial navigation timeout, retrying with domcontentloaded...`);
-        await page.goto(`https://www.hltv.org/search?query=${encodeURIComponent(QUERY)}`, { 
-          waitUntil: 'domcontentloaded', 
-          timeout: 40000 
-        });
-      }
+      // Cloudflare/proxy pages may never reach networkidle/load. Commit lets us
+      // inspect the page quickly and classify a real block instead of timing out.
+      await gotoHltvPage(page, `https://www.hltv.org/search?query=${encodeURIComponent(QUERY)}`, 'search');
       
       // Human-like reading pause
       await new Promise(r => setTimeout(r, 2000 + Math.random() * 2000));
@@ -195,6 +185,9 @@ async function scrapeHltv() {
         await saveDebugScreenshot(page, 'selector-timeout');
         await page.mouse.wheel(0, 500);
         await new Promise(r => setTimeout(r, 3000));
+        if (await isCloudflareChallenge(page)) {
+          throw new Error('Cloudflare block/challenge detected on HLTV search page');
+        }
       }
 
       const results = await page.evaluate((query) => {
@@ -239,13 +232,25 @@ async function scrapeHltv() {
         return rawEvents;
       }, QUERY);
 
+      if (results.length === 0 && await isBrowserErrorPage(page)) {
+        await saveDebugScreenshot(page, 'browser-error-page');
+        throw new Error('Proxy tunnel/browser navigation failed on HLTV search page');
+      }
+
+      if (results.length === 0 && await isCloudflareChallenge(page)) {
+        await saveDebugScreenshot(page, 'cloudflare-block');
+        throw new Error('Cloudflare block/challenge detected on HLTV search page');
+      }
+
       const events = [];
       const today = new Date();
       const enrichSearchResults = process.env.HLTV_SEARCH_ENRICH === '1';
-      const topResults = results.slice(0, 15);
+      const maxEventPages = Number(process.env.HLTV_SEARCH_TOP_RESULTS || 8);
+      const maxValidEvents = Number(process.env.HLTV_SEARCH_MAX_EVENTS || 10);
+      const topResults = results.slice(0, maxEventPages);
       
       for (const item of topResults) {
-        if (events.length >= 15) break;
+        if (events.length >= maxValidEvents) break;
         const { id, title, href, dates: rawDates } = item;
         
         let cleanTitle = title
@@ -296,7 +301,7 @@ async function scrapeHltv() {
           }
         }
 
-        if (enrichSearchResults && !shouldKeepEvent({ title: cleanTitle, href, dates: finalDates || rawDates, status: pageStatus }, QUERY, today)) continue;
+        if (!shouldKeepEvent({ title: cleanTitle, href, dates: finalDates || rawDates, status: pageStatus }, QUERY, today)) continue;
 
         const formattedDates = finalDates && finalDates !== "Date TBD" ? formatHltvDate(finalDates, today) : formatHltvDate(rawDates, today);
 
@@ -311,7 +316,7 @@ async function scrapeHltv() {
         }
       }
 
-      const finalResult = { ok: true, events: events.slice(0, 15) };
+      const finalResult = { ok: true, events: events.slice(0, maxValidEvents) };
       setCache(finalResult);
       console.log(JSON.stringify(finalResult));
     } else if (MODE === 'health') {
@@ -613,6 +618,67 @@ async function saveDebugScreenshot(page, reason) {
     await page.screenshot({ path: path.join(debugDir, fileName), fullPage: true });
   } catch (e) {
     console.error(`[HLTV Playwright] Failed to save debug screenshot: ${e.message}`);
+  }
+}
+
+async function gotoHltvPage(page, url, reason) {
+  try {
+    const response = await page.goto(url, { waitUntil: 'commit', timeout: 35000 });
+    await page.waitForLoadState('domcontentloaded', { timeout: 15000 }).catch(() => {});
+    await page.waitForTimeout(1500 + Math.random() * 1500);
+
+    const status = response?.status?.();
+    if (status === 403 || status === 424) {
+      await saveDebugScreenshot(page, `${reason}-cloudflare-http-${status}`);
+      throw new Error(`Cloudflare block/challenge detected on HLTV ${reason} page (${status})`);
+    }
+    if (status && status >= 500) {
+      await saveDebugScreenshot(page, `${reason}-source-${status}`);
+      throw new Error(`HLTV source returned ${status} on ${reason} page`);
+    }
+    if (await isBrowserErrorPage(page)) {
+      await saveDebugScreenshot(page, `${reason}-browser-error`);
+      throw new Error(`Proxy tunnel/browser navigation failed on HLTV ${reason} page`);
+    }
+
+    if (await isCloudflareChallenge(page)) {
+      await page.waitForTimeout(8000 + Math.random() * 3000);
+      if (await isCloudflareChallenge(page)) {
+        await saveDebugScreenshot(page, `${reason}-cloudflare`);
+        throw new Error(`Cloudflare block/challenge detected on HLTV ${reason} page`);
+      }
+    }
+    return response;
+  } catch (e) {
+    await saveDebugScreenshot(page, `${reason}-navigation-error`);
+    throw e;
+  }
+}
+
+async function isCloudflareChallenge(page) {
+  try {
+    return await page.evaluate(() => {
+      const title = document.title || '';
+      const body = document.body?.innerText || '';
+      const text = `${title}\n${body}`.toLowerCase();
+      return /just a moment|attention required|verify you are human|checking if the site connection is secure|checking your browser|cf-ray|cloudflare ray id/.test(text);
+    });
+  } catch {
+    return false;
+  }
+}
+
+async function isBrowserErrorPage(page) {
+  try {
+    if (page.url().startsWith('chrome-error://')) return true;
+    return await page.evaluate(() => {
+      const title = document.title || '';
+      const body = document.body?.innerText || '';
+      const text = `${title}\n${body}`.toLowerCase();
+      return /this site can.?t be reached|err_proxy|err_tunnel|err_connection|proxy server/i.test(text);
+    });
+  } catch {
+    return false;
   }
 }
 

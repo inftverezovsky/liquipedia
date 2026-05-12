@@ -308,14 +308,14 @@ async function getHltvProxyCandidate(attempt: number): Promise<HltvProxyCandidat
 
 function getMaxAttempts(mode: HltvMode) {
   if (mode === "health") return 1;
-  if (mode === "search") return 1;
+  if (mode === "search") return Number(process.env.HLTV_SEARCH_MAX_ATTEMPTS || 2);
   if (mode === "events" || mode === "scrape") return 2;
   return 3;
 }
 
 function getTimeoutMs(mode: HltvMode) {
   if (mode === "health") return 30000;
-  if (mode === "search") return 45000;
+  if (mode === "search") return 90000;
   if (mode === "events" || mode === "scrape") return 90000;
   return 120000;
 }
@@ -331,7 +331,7 @@ function shouldRetry(mode: HltvMode, errorClass: string, attempt: number, maxAtt
 
   if (normalized === "empty_valid") return false;
   if (normalized === "selector_changed" || normalized === "source_4xx" || normalized === "proxy_missing") return false;
-  if (normalized === "cloudflare_block" || normalized === "parse_failed") return attempt < 2;
+  if (normalized === "cloudflare_block" || normalized === "parse_failed") return attempt < Math.min(maxAttempts, 2);
   return normalized !== "unknown" || attempt < 2;
 }
 

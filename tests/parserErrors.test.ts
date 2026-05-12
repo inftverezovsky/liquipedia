@@ -9,6 +9,7 @@ import {
 
 test("classifyParserError maps proxy tunnel failures", () => {
   assert.equal(classifyParserError({ message: "net::ERR_TUNNEL_CONNECTION_FAILED" }), "proxy_tunnel");
+  assert.equal(classifyParserError({ message: "Navigation interrupted by chrome-error://chromewebdata/" }), "proxy_tunnel");
   assert.equal(normalizeParserErrorClass("tunnel"), "proxy_tunnel");
 });
 

@@ -48,9 +48,10 @@ export async function POST(request: Request) {
     const newProxies = [];
     for (const rawUrl of rawUrls) {
       try {
-        const url = new URL(rawUrl.startsWith('http') ? rawUrl : `http://${rawUrl}`);
+        const normalized = normalizeProxyUrl(rawUrl);
+        const url = new URL(normalized);
         newProxies.push({
-          url: rawUrl,
+          url: normalized,
           protocol: url.protocol.replace(':', ''),
           host: url.hostname,
           port: parseInt(url.port) || 80,
@@ -100,7 +101,7 @@ export async function DELETE(request: Request) {
 
 function maskProxyUrl(rawUrl: string) {
   try {
-    const url = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(rawUrl) ? rawUrl : `http://${rawUrl}`);
+    const url = new URL(normalizeProxyUrl(rawUrl));
     if (url.username) url.username = maskValue(url.username);
     if (url.password) url.password = "***";
     return url.toString();
@@ -112,4 +113,33 @@ function maskProxyUrl(rawUrl: string) {
 function maskValue(value: string) {
   if (value.length <= 4) return "***";
   return `${value.slice(0, 2)}***${value.slice(-2)}`;
+}
+
+function normalizeProxyUrl(rawUrl: string) {
+  const withProtocol = /^[a-z][a-z0-9+.-]*:\/\//i.test(rawUrl)
+    ? rawUrl
+    : `http://${rawUrl}`;
+  const url = new URL(withProtocol);
+
+  if (isGWGateway(url.hostname)) {
+    // The provider UI labels this as HTTP proxy. The working gateway endpoint
+    // is HTTP CONNECT on 10080; https://geo.g-w.info:10443 causes browser timeouts.
+    url.protocol = "http:";
+    if (!url.port || url.port === "10443") {
+      url.port = "10080";
+    }
+
+    const username = decodeURIComponent(url.username || "");
+    if (username && !username.startsWith("user-")) {
+      const country = process.env.GW_PROXY_DEFAULT_COUNTRY || "ru";
+      url.username = `user-${username}-type-residential-country-${country.toLowerCase()}`;
+    }
+  }
+
+  return url.toString();
+}
+
+function isGWGateway(hostname: string) {
+  const host = hostname.toLowerCase();
+  return host === "geo.g-w.info" || host.endsWith(".g-w.info");
 }

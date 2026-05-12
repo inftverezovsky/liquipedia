@@ -170,6 +170,16 @@ function proxyScore(proxy: CachedProxy) {
 function rotateProxySession(username: string) {
   if (!username) return username;
   const randomSession = Math.random().toString(36).substring(2, 10);
+
+  // FloppyData/g-w gateway accepts sticky sessions through the extended
+  // username. Do not append provider-specific suffixes to generic proxies:
+  // many simple username/password proxies treat that as invalid credentials.
+  const supportsSessionSuffix =
+    username.startsWith("user-")
+    || username.includes("-type-")
+    || username.includes("-country-");
+  if (!supportsSessionSuffix) return username;
+
   if (username.includes("-session-")) {
     return username.replace(/-session-[a-zA-Z0-9]+/, `-session-${randomSession}`);
   }

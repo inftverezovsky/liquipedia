@@ -71,7 +71,7 @@ test("dedupeTournamentMatches removes generated crosstable slots covered by sche
   assert.equal(matches[0].matchId, "scheduled");
 });
 
-test("dedupeTournamentMatches keeps generated crosstable slots until a schedule exists", () => {
+test("dedupeTournamentMatches removes generated crosstable slots without schedule data", () => {
   const matches = dedupeTournamentMatches([
     {
       matchId: "generated-crosstable",
@@ -87,7 +87,7 @@ test("dedupeTournamentMatches keeps generated crosstable slots until a schedule 
     },
   ]);
 
-  assert.equal(matches.length, 1);
+  assert.equal(matches.length, 0);
 });
 
 test("dedupeTournamentMatches collapses same visible time with and without timezone suffix", () => {

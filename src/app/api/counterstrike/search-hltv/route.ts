@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { runHltvScript } from "@/lib/hltv/scraper";
-import { classifyParserError, emptyValidIfNoItems } from "@/lib/parserErrors";
+import { emptyValidIfNoItems } from "@/lib/parserErrors";
+import { getHltvSearchErrorMessage, normalizeHltvErrorClass } from "@/lib/hltv/userFacingErrors";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300; // 5 minutes for long scraping with retries
@@ -27,8 +28,13 @@ export async function GET(request: Request) {
       errorClass: data.errorClass || emptyValidIfNoItems([results.length]),
     });
   } catch (error: any) {
-    const errorClass = classifyParserError({ message: error.message });
+    const errorClass = normalizeHltvErrorClass(error.errorClass, error.message);
     console.error('[HLTV Search API] Error:', error);
-    return NextResponse.json({ ok: false, error: error.message, errorClass }, { status: 500 });
+    return NextResponse.json({
+      ok: false,
+      error: error.message,
+      errorClass,
+      userMessage: getHltvSearchErrorMessage(errorClass, error.message),
+    }, { status: 500 });
   }
 }

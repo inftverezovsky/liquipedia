@@ -174,7 +174,7 @@ async function scrapeHltv() {
       
       // Human-like reading pause
       await new Promise(r => setTimeout(r, 2000 + Math.random() * 2000));
-      await page.mouse.wheel(0, 100 + Math.random() * 200);
+      await safeMouseWheel(page, 0, 100 + Math.random() * 200, 'initial-search-scroll');
       
       try {
         // Wait specifically for event search results or no-results message
@@ -183,7 +183,7 @@ async function scrapeHltv() {
       } catch (e) {
         console.error(`[HLTV Playwright] Timeout waiting for selectors. Capturing debug screenshot...`);
         await saveDebugScreenshot(page, 'selector-timeout');
-        await page.mouse.wheel(0, 500);
+        await safeMouseWheel(page, 0, 500, 'selector-timeout-scroll');
         await new Promise(r => setTimeout(r, 3000));
         if (await isCloudflareChallenge(page)) {
           throw new Error('Cloudflare block/challenge detected on HLTV search page');
@@ -486,13 +486,114 @@ async function scrapeHltv() {
         ...stale,
         warning: `HLTV upstream error, returned stale cache: ${err.message}`
       }));
+    } else if (MODE === 'search') {
+      const related = getRelatedSearchCache(QUERY);
+      if (related) {
+        console.error('[HLTV Playwright] Returning related search cache after upstream error');
+        console.log(JSON.stringify({
+          ok: true,
+          events: related.events,
+          cacheHit: true,
+          cacheLayer: 'file-related',
+          stale: true,
+          warning: `HLTV upstream error, returned related cache: ${err.message}`,
+        }));
+      } else {
+        console.log(JSON.stringify({ ok: false, error: normalizeClosedBrowserError(err.message) }));
+      }
     } else {
-      console.log(JSON.stringify({ ok: false, error: err.message }));
+      console.log(JSON.stringify({ ok: false, error: normalizeClosedBrowserError(err.message) }));
     }
   } finally {
     clearTimeout(scriptTimeout);
     if (browser) await browser.close();
   }
+}
+
+async function safeMouseWheel(page, deltaX, deltaY, reason) {
+  try {
+    if (page.isClosed()) {
+      throw new Error(`HLTV page closed during ${reason}`);
+    }
+    await page.mouse.wheel(deltaX, deltaY);
+  } catch (e) {
+    const message = String(e?.message || e || '');
+    if (/Target page, context or browser has been closed|page closed|browser has been closed/i.test(message)) {
+      throw new Error(`HLTV browser closed before search finished (${reason})`);
+    }
+    throw e;
+  }
+}
+
+function getRelatedSearchCache(query) {
+  if (!query || !fs.existsSync(CACHE_DIR)) return null;
+
+  const scored = [];
+  for (const entry of fs.readdirSync(CACHE_DIR)) {
+    if (!entry.endsWith('.json')) continue;
+
+    try {
+      const cachePath = path.join(CACHE_DIR, entry);
+      const data = JSON.parse(fs.readFileSync(cachePath, 'utf8'));
+      const events = Array.isArray(data?.result?.events) ? data.result.events : [];
+      if (events.length === 0) continue;
+
+      const matchingEvents = events
+        .map((event) => ({ event, score: getSearchMatchScore(query, `${event.title || ''} ${event.url || ''}`) }))
+        .filter((item) => item.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .map((item) => item.event);
+
+      if (matchingEvents.length > 0) {
+        scored.push({
+          events: matchingEvents,
+          score: getSearchMatchScore(query, matchingEvents.map((event) => `${event.title || ''} ${event.url || ''}`).join(' ')),
+          timestamp: Number(data.timestamp || 0),
+        });
+      }
+    } catch {}
+  }
+
+  scored.sort((a, b) => b.score - a.score || b.timestamp - a.timestamp);
+  const best = scored[0];
+  return best ? { events: best.events.slice(0, Number(process.env.HLTV_SEARCH_MAX_EVENTS || 10)) } : null;
+}
+
+function getSearchMatchScore(query, value) {
+  const queryTokens = normalizeSearchTokens(query);
+  if (queryTokens.length === 0) return 0;
+
+  const haystack = normalizeSearchText(value);
+  let score = 0;
+  for (const token of queryTokens) {
+    if (haystack.includes(token)) {
+      score += token.length >= 4 ? 3 : 1;
+    } else {
+      return 0;
+    }
+  }
+  return score;
+}
+
+function normalizeSearchTokens(value) {
+  return normalizeSearchText(value)
+    .split(' ')
+    .filter((token) => token.length >= 2);
+}
+
+function normalizeSearchText(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function normalizeClosedBrowserError(message) {
+  if (/Target page, context or browser has been closed|browser closed before search finished|page closed|browser has been closed/i.test(String(message || ''))) {
+    return 'HLTV browser closed before the request finished';
+  }
+  return message;
 }
 
 function parseHltvDate(dateStr, today) {
@@ -651,8 +752,24 @@ async function gotoHltvPage(page, url, reason) {
     return response;
   } catch (e) {
     await saveDebugScreenshot(page, `${reason}-navigation-error`);
-    throw e;
+    throw await normalizeNavigationError(page, e, reason);
   }
+}
+
+async function normalizeNavigationError(page, error, reason) {
+  const message = String(error?.message || error || '');
+  if (
+    /chrome-error:\/\/chromewebdata|ERR_TUNNEL|ERR_PROXY|ERR_SOCKS|ERR_CONNECTION|ERR_ABORTED|ERR_NAME_NOT_RESOLVED|ERR_HTTP2_PROTOCOL_ERROR/i.test(message) ||
+    await isBrowserErrorPage(page)
+  ) {
+    return new Error(`Proxy tunnel/browser navigation failed on HLTV ${reason} page`);
+  }
+
+  if (/ERR_TIMED_OUT|ETIMEDOUT|ESOCKETTIMEDOUT|timed out|timeout|deadline exceeded/i.test(message)) {
+    return new Error(`HLTV ${reason} page navigation timed out`);
+  }
+
+  return error instanceof Error ? error : new Error(message || `HLTV ${reason} page navigation failed`);
 }
 
 async function isCloudflareChallenge(page) {

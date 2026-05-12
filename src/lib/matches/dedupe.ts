@@ -36,7 +36,7 @@ export function dedupeTournamentMatches<T extends MatchDedupeInput>(matches: rea
   );
 
   for (const match of matches) {
-    if (isCoveredGeneratedRoundRobinSlot(match, scheduledPairKeys)) {
+    if (isGeneratedScheduleMatrixRow(match) || isCoveredGeneratedRoundRobinSlot(match, scheduledPairKeys)) {
       continue;
     }
 
@@ -195,6 +195,12 @@ function hasPlaceholderSide(match: MatchDedupeInput) {
 }
 
 function isCoveredGeneratedRoundRobinSlot(match: MatchDedupeInput, scheduledPairKeys: Set<string>) {
+  if (!isGeneratedScheduleMatrixRow(match)) return false;
+  const pairKey = getPairOnlyKey(match);
+  return Boolean(pairKey && scheduledPairKeys.has(pairKey));
+}
+
+function isGeneratedScheduleMatrixRow(match: MatchDedupeInput) {
   if (hasPlaceholderSide(match)) return false;
   if (parseDateLike(match.matchDate)) return false;
 
@@ -211,10 +217,7 @@ function isCoveredGeneratedRoundRobinSlot(match: MatchDedupeInput, scheduledPair
   const isGeneratedRoundRobin =
     normalizeLoose(match.format) === "round robin"
     || normalizeLoose(match.rawText).includes("crosstable");
-  if (!isGeneratedRoundRobin) return false;
-
-  const pairKey = getPairOnlyKey(match);
-  return Boolean(pairKey && scheduledPairKeys.has(pairKey));
+  return isGeneratedRoundRobin;
 }
 
 function getPairOnlyKey(match: MatchDedupeInput) {

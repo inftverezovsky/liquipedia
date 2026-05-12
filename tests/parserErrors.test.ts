@@ -6,6 +6,7 @@ import {
   normalizeParserErrorClass,
   shouldCooldownProxyForError,
 } from "../src/lib/parserErrors";
+import { getHltvSearchErrorMessage } from "../src/lib/hltv/userFacingErrors";
 
 test("classifyParserError maps proxy tunnel failures", () => {
   assert.equal(classifyParserError({ message: "net::ERR_TUNNEL_CONNECTION_FAILED" }), "proxy_tunnel");
@@ -24,6 +25,8 @@ test("classifyParserError maps Cloudflare and source statuses", () => {
 test("classifyParserError maps parser and selector failures", () => {
   assert.equal(classifyParserError({ message: "Timeout waiting for search elements" }), "selector_changed");
   assert.equal(classifyParserError({ message: "request timed out" }), "timeout");
+  assert.equal(classifyParserError({ message: "page.goto: net::ERR_TIMED_OUT at https://www.hltv.org/search" }), "timeout");
+  assert.equal(classifyParserError({ message: "mouse.wheel: Target page, context or browser has been closed" }), "timeout");
   assert.equal(classifyParserError({ message: "selector .match-wrapper not found" }), "selector_changed");
   assert.equal(classifyParserError({ message: "Liquipedia API returned invalid JSON" }), "parse_failed");
 });
@@ -33,4 +36,15 @@ test("empty_valid is explicit and does not cool down proxies", () => {
   assert.equal(emptyValidIfNoItems([1]), null);
   assert.equal(shouldCooldownProxyForError("empty_valid"), false);
   assert.equal(shouldCooldownProxyForError("proxy_tunnel"), true);
+});
+
+test("HLTV user-facing errors hide technical scraper messages", () => {
+  assert.equal(
+    getHltvSearchErrorMessage(null, "HLTV request timed out. Proxy might be too slow."),
+    "HLTV не успел ответить через текущий прокси. Попробуйте обновить поиск или сменить прокси.",
+  );
+  assert.equal(
+    getHltvSearchErrorMessage(null, "page.goto: net::ERR_TIMED_OUT at https://www.hltv.org/search"),
+    "HLTV не успел ответить через текущий прокси. Попробуйте обновить поиск или сменить прокси.",
+  );
 });

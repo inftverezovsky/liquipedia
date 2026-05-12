@@ -72,6 +72,14 @@ export function classifyParserError(input: ParserErrorInput): ParserErrorClass {
   if (statusCode && statusCode >= 500) return "source_5xx";
   if (statusCode && statusCode >= 400) return "source_4xx";
 
+  if (/ERR_TIMED_OUT|ETIMEDOUT|ESOCKETTIMEDOUT|navigation timed out|page\.goto: timeout/i.test(message)) {
+    return "timeout";
+  }
+
+  if (/Target page, context or browser has been closed|browser closed before|page closed|browser has been closed/i.test(message)) {
+    return "timeout";
+  }
+
   if (/selector|waiting for .*elements|locator|element.*not found|Timeout waiting/i.test(message)) {
     return "selector_changed";
   }

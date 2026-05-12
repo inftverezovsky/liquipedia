@@ -1,4 +1,6 @@
 import { spawn } from "child_process";
+import fs from "fs";
+import path from "path";
 import { prisma } from "@/lib/db";
 import { markProxyFailure, markProxySuccess, maskProxyUrl, selectProxyCandidate } from "@/lib/proxySelector";
 import {
@@ -17,6 +19,7 @@ export type HltvMode = "scrape" | "search" | "event" | "events" | "health";
 
 const HLTV_MODES = new Set<HltvMode>(["scrape", "search", "event", "events", "health"]);
 const MAX_OUTPUT_BYTES = 2 * 1024 * 1024;
+const HLTV_CACHE_DIR = path.join(process.cwd(), "cache", "hltv");
 
 type HltvProxyCandidate = {
   proxyStr: string;
@@ -26,6 +29,19 @@ type HltvProxyCandidate = {
 export async function runHltvScript(mode: HltvMode, queryOrId?: string, options: { noCache?: boolean } = {}) {
   if (!HLTV_MODES.has(mode)) {
     throw new Error(`Unsupported HLTV scraper mode: ${mode}`);
+  }
+
+  if (mode === "search" && queryOrId && !options.noCache) {
+    const relatedCache = readRelatedHltvSearchCache(queryOrId);
+    if (relatedCache) {
+      return {
+        ok: true,
+        events: relatedCache.events,
+        cacheHit: true,
+        cacheLayer: "file-related",
+        stale: true,
+      };
+    }
   }
 
   const requestKey = `${mode}:${queryOrId}:${options.noCache ? "force" : "cached"}`;
@@ -107,6 +123,8 @@ async function executeScraper(mode: HltvMode, queryOrId?: string, requestId = "h
     let stdout = "";
     let stderr = "";
     let timedOut = false;
+    let settled = false;
+    let timeoutSettling = false;
 
     const child = spawn(process.execPath, args, {
       cwd: process.cwd(),
@@ -114,10 +132,66 @@ async function executeScraper(mode: HltvMode, queryOrId?: string, requestId = "h
       stdio: ["ignore", "pipe", "pipe"],
     });
 
+    const settleResolve = (value: any) => {
+      if (settled) return false;
+      settled = true;
+      clearTimeout(timer);
+      resolve(value);
+      return true;
+    };
+
+    const settleReject = (error: Error) => {
+      if (settled) return false;
+      settled = true;
+      clearTimeout(timer);
+      reject(error);
+      return true;
+    };
+
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill();
+      timeoutSettling = true;
+      forceKillChild(child.pid);
+      void handleChildTimeout();
     }, getTimeoutMs(mode));
+
+    const handleChildTimeout = async () => {
+      const errorClass = classifyHltvError("HLTV request timed out. Proxy might be too slow.", true);
+      const durationMs = Date.now() - startedAt;
+
+      await markProxyFailure(selectedProxyId, {
+        errorClass,
+        errorMessage: "HLTV request timed out. Proxy might be too slow.",
+        durationMs,
+      });
+      await logParserRequest({
+        source: "hltv",
+        mode,
+        proxyId: selectedProxyId,
+        attempt,
+        errorClass,
+        durationMs,
+        bytesIn: stdout.length + stderr.length,
+      });
+
+      const relatedCache = mode === "search" ? readRelatedHltvSearchCache(queryOrId) : null;
+      if (relatedCache) {
+        console.log(`[HLTV Scraper Lib] Returning related HLTV search cache after timeout.`);
+        settleResolve({
+          ok: true,
+          events: relatedCache.events,
+          cacheHit: true,
+          cacheLayer: "file-related",
+          stale: true,
+          warning: "HLTV upstream timed out, returned related cache.",
+        });
+        return;
+      }
+
+      const finalError = new Error("HLTV request timed out. Proxy might be too slow.") as Error & { errorClass?: string };
+      finalError.errorClass = errorClass;
+      settleReject(finalError);
+    };
 
     const appendCapped = (current: string, chunk: Buffer) => {
       const next = current + chunk.toString("utf8");
@@ -133,6 +207,7 @@ async function executeScraper(mode: HltvMode, queryOrId?: string, requestId = "h
     });
 
     child.on("error", async (error) => {
+      if (settled || timeoutSettling) return;
       clearTimeout(timer);
       console.error(`[HLTV Scraper Lib] Spawn error on attempt ${attempt}: ${error.message}`);
       const durationMs = Date.now() - startedAt;
@@ -157,10 +232,11 @@ async function executeScraper(mode: HltvMode, queryOrId?: string, requestId = "h
         return;
       }
 
-      return reject(new Error("HLTV scraper failed to start."));
+      return settleReject(new Error("HLTV scraper failed to start."));
     });
 
     child.on("close", async (code) => {
+      if (settled || timeoutSettling) return;
       clearTimeout(timer);
       if (code !== 0 || timedOut) {
         const errorMessage = pickHltvErrorLine(stderr, stdout) || "Unknown scraper failure";
@@ -196,8 +272,24 @@ async function executeScraper(mode: HltvMode, queryOrId?: string, requestId = "h
           executeScraper(mode, queryOrId, requestId, 1, true, options).then(resolve, reject);
           return;
         }
+
+        const relatedCache = mode === "search" ? readRelatedHltvSearchCache(queryOrId) : null;
+        if (relatedCache) {
+          console.log(`[HLTV Scraper Lib] Returning related HLTV search cache after ${errorClass}.`);
+          settleResolve({
+            ok: true,
+            events: relatedCache.events,
+            cacheHit: true,
+            cacheLayer: "file-related",
+            stale: true,
+            warning: `HLTV upstream failed (${errorClass}), returned related cache.`,
+          });
+          return;
+        }
         
-        return reject(new Error(timedOut ? "HLTV request timed out. Proxy might be too slow." : "HLTV scraper failed. Proxy might be blocked."));
+        const finalError = new Error(timedOut ? "HLTV request timed out. Proxy might be too slow." : "HLTV scraper failed. Proxy might be blocked.") as Error & { errorClass?: string };
+        finalError.errorClass = errorClass;
+        return settleReject(finalError);
       }
 
       try {
@@ -236,7 +328,7 @@ async function executeScraper(mode: HltvMode, queryOrId?: string, requestId = "h
             matchesCount,
             eventsCount,
           });
-          resolve(data);
+          settleResolve(data);
         } else {
           const errorClass = classifyHltvError(data.error || "unknown", false);
           const durationMs = Date.now() - startedAt;
@@ -267,7 +359,22 @@ async function executeScraper(mode: HltvMode, queryOrId?: string, requestId = "h
             executeScraper(mode, queryOrId, requestId, 1, true, options).then(resolve, reject);
             return;
           }
-          return reject(new Error(data.error || "Unknown scraper error"));
+          const relatedCache = mode === "search" ? readRelatedHltvSearchCache(queryOrId) : null;
+          if (relatedCache) {
+            console.log(`[HLTV Scraper Lib] Returning related HLTV search cache after ${errorClass}.`);
+            settleResolve({
+              ok: true,
+              events: relatedCache.events,
+              cacheHit: true,
+              cacheLayer: "file-related",
+              stale: true,
+              warning: `HLTV upstream failed (${errorClass}), returned related cache.`,
+            });
+            return;
+          }
+          const finalError = new Error(data.error || "Unknown scraper error") as Error & { errorClass?: string };
+          finalError.errorClass = errorClass;
+          return settleReject(finalError);
         }
       } catch (e) {
         const durationMs = Date.now() - startedAt;
@@ -294,7 +401,7 @@ async function executeScraper(mode: HltvMode, queryOrId?: string, requestId = "h
           return;
         }
         
-        return reject(new Error(`Failed to parse HLTV output after ${MAX_ATTEMPTS} attempts`));
+        return settleReject(new Error(`Failed to parse HLTV output after ${MAX_ATTEMPTS} attempts`));
       }
     });
   });
@@ -308,14 +415,14 @@ async function getHltvProxyCandidate(attempt: number): Promise<HltvProxyCandidat
 
 function getMaxAttempts(mode: HltvMode) {
   if (mode === "health") return 1;
-  if (mode === "search") return Number(process.env.HLTV_SEARCH_MAX_ATTEMPTS || 2);
+  if (mode === "search") return Number(process.env.HLTV_SEARCH_MAX_ATTEMPTS || 1);
   if (mode === "events" || mode === "scrape") return 2;
   return 3;
 }
 
 function getTimeoutMs(mode: HltvMode) {
   if (mode === "health") return 30000;
-  if (mode === "search") return 90000;
+  if (mode === "search") return Number(process.env.HLTV_SEARCH_TIMEOUT_MS || 45000);
   if (mode === "events" || mode === "scrape") return 90000;
   return 120000;
 }
@@ -337,6 +444,22 @@ function shouldRetry(mode: HltvMode, errorClass: string, attempt: number, maxAtt
 
 function allowDirectFallback() {
   return process.env.HLTV_ALLOW_DIRECT_FALLBACK === "1";
+}
+
+function forceKillChild(pid?: number) {
+  if (!pid) return;
+
+  try {
+    process.kill(pid, "SIGKILL");
+  } catch {}
+
+  if (process.platform === "win32") {
+    const killer = spawn("taskkill", ["/PID", String(pid), "/T", "/F"], {
+      windowsHide: true,
+      stdio: "ignore",
+    });
+    killer.on("error", () => {});
+  }
 }
 
 async function logParserRequest(data: {
@@ -396,4 +519,65 @@ function pickHltvErrorLine(stderr: string, stdout: string) {
   return lines.reverse().find((line) =>
     /ERR_|error|failed|timeout|timed out|cloudflare|captcha|403|407|429|tunnel|selector|parse/i.test(line)
   ) || lines.at(-1) || null;
+}
+
+function readRelatedHltvSearchCache(query?: string) {
+  if (!query || !fs.existsSync(HLTV_CACHE_DIR)) return null;
+
+  const scored: Array<{ events: any[]; score: number; timestamp: number }> = [];
+  for (const entry of fs.readdirSync(HLTV_CACHE_DIR)) {
+    if (!entry.endsWith(".json")) continue;
+
+    try {
+      const cachePath = path.join(HLTV_CACHE_DIR, entry);
+      const data = JSON.parse(fs.readFileSync(cachePath, "utf8"));
+      const events = Array.isArray(data?.result?.events) ? data.result.events : [];
+      if (events.length === 0) continue;
+
+      const matchingEvents = events
+        .map((event: any) => ({ event, score: getSearchMatchScore(query, `${event.title || ""} ${event.url || ""}`) }))
+        .filter((item: { score: number }) => item.score > 0)
+        .sort((a: { score: number }, b: { score: number }) => b.score - a.score)
+        .map((item: { event: any }) => item.event);
+
+      if (matchingEvents.length > 0) {
+        scored.push({
+          events: matchingEvents,
+          score: getSearchMatchScore(query, matchingEvents.map((event: any) => `${event.title || ""} ${event.url || ""}`).join(" ")),
+          timestamp: Number(data.timestamp || 0),
+        });
+      }
+    } catch {}
+  }
+
+  scored.sort((a, b) => b.score - a.score || b.timestamp - a.timestamp);
+  const best = scored[0];
+  return best ? { events: best.events.slice(0, Number(process.env.HLTV_SEARCH_MAX_EVENTS || 10)) } : null;
+}
+
+function getSearchMatchScore(query: string, value: string) {
+  const queryTokens = normalizeSearchTokens(query);
+  if (queryTokens.length === 0) return 0;
+
+  const haystack = normalizeSearchText(value);
+  let score = 0;
+  for (const token of queryTokens) {
+    if (!haystack.includes(token)) return 0;
+    score += token.length >= 4 ? 3 : 1;
+  }
+  return score;
+}
+
+function normalizeSearchTokens(value: string) {
+  return normalizeSearchText(value)
+    .split(" ")
+    .filter((token) => token.length >= 2);
+}
+
+function normalizeSearchText(value: string) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }

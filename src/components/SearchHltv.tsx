@@ -3,12 +3,21 @@
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, Calendar, Trash2 } from "lucide-react";
+import { getHltvSearchErrorMessage } from "@/lib/hltv/userFacingErrors";
 
 type HltvEvent = {
   id: string;
   title: string;
   url: string;
   dates?: string;
+};
+
+type HltvSearchResponse = {
+  ok?: boolean;
+  results?: HltvEvent[];
+  error?: string;
+  errorClass?: string | null;
+  userMessage?: string | null;
 };
 
 export default function SearchHltv({ disciplineSlug }: { disciplineSlug: string }) {
@@ -25,7 +34,7 @@ export default function SearchHltv({ disciplineSlug }: { disciplineSlug: string 
     setResults([]);
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 200000);
+    const timeoutId = setTimeout(() => controller.abort(), 70000);
 
     try {
       const response = await fetch(`/api/${disciplineSlug}/search-hltv?query=${encodeURIComponent(query)}${force ? "&force=true" : ""}`, {
@@ -33,14 +42,17 @@ export default function SearchHltv({ disciplineSlug }: { disciplineSlug: string 
       });
       clearTimeout(timeoutId);
       
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error ?? "Search failed");
+      const data = await response.json().catch(() => ({})) as HltvSearchResponse;
+      if (!response.ok) {
+        setError(data.userMessage || getHltvSearchErrorMessage(data.errorClass, data.error));
+        return;
+      }
       setResults(data.results ?? []);
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') {
-        setError("HLTV не ответил за 200 секунд. Обычно это значит, что прокси слишком медленный или Cloudflare временно блокирует текущую proxy-сессию.");
+        setError("HLTV не ответил за 70 секунд. Обычно это значит, что прокси слишком медленный или временно заблокирован.");
       } else {
-        setError(err instanceof Error ? err.message : "Search error");
+        setError(getHltvSearchErrorMessage(null, err instanceof Error ? err.message : "Search error"));
       }
     } finally {
       setLoading(false);

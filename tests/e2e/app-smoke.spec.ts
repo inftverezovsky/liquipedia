@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 test("home page exposes discipline navigation", async ({ page }) => {
   await page.goto("/");
 
-  await expect(page.getByRole("heading", { name: /добро пожаловать/i })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /оперативная панель tcyber/i })).toBeVisible();
 
   for (const slug of ["dota2", "counterstrike", "leagueoflegends", "valorant"]) {
     await expect(page.locator(`a[href="/${slug}"]`).first()).toBeVisible();

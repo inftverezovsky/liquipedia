@@ -151,9 +151,9 @@ export default function SearchTournament({ disciplineSlug, hideSidebar = false }
 
         {results.map((result) => (
           <article key={`${result.pageId}-${result.title}`} className="rounded-lg border border-slate-100 bg-slate-50/50 p-5 transition-colors hover:border-indigo-200 hover:bg-white">
-            <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
+            <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-start">
               <div className="flex flex-col gap-3 flex-1 min-w-0">
-                <h3 className="text-xl font-bold text-slate-900 leading-tight">
+                <h3 className="break-words text-lg font-bold leading-tight text-slate-900 sm:text-xl">
                   {result.title}
                 </h3>
                 
@@ -181,12 +181,12 @@ export default function SearchTournament({ disciplineSlug, hideSidebar = false }
                 )}
               </div>
               
-              <div className="flex shrink-0 flex-wrap gap-3">
+              <div className="grid gap-2 sm:flex sm:flex-wrap xl:justify-end">
                 <a
                   href={result.pageUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="flex h-11 items-center justify-center px-6 rounded-xl border border-slate-300 bg-white text-[10px] font-black uppercase tracking-widest text-slate-900 hover:bg-slate-50 transition-all"
+                  className="flex h-11 min-w-0 items-center justify-center rounded-xl border border-slate-300 bg-white px-4 text-[10px] font-black uppercase tracking-widest text-slate-900 transition-all hover:bg-slate-50 sm:px-6"
                 >
                   Wiki
                 </a>

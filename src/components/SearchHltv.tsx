@@ -25,7 +25,7 @@ export default function SearchHltv({ disciplineSlug }: { disciplineSlug: string 
     setResults([]);
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 180000); // 3 minutes for retries
+    const timeoutId = setTimeout(() => controller.abort(), 60000);
 
     try {
       const response = await fetch(`/api/${disciplineSlug}/search-hltv?query=${encodeURIComponent(query)}${force ? "&force=true" : ""}`, {
@@ -38,7 +38,7 @@ export default function SearchHltv({ disciplineSlug }: { disciplineSlug: string 
       setResults(data.results ?? []);
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') {
-        setError("Поиск занял слишком много времени. Попробуйте еще раз.");
+        setError("HLTV не ответил за 60 секунд. Обычно это значит, что прокси слишком медленный или временно заблокирован.");
       } else {
         setError(err instanceof Error ? err.message : "Search error");
       }
@@ -168,9 +168,9 @@ export default function SearchHltv({ disciplineSlug }: { disciplineSlug: string 
 
         {results.map((result) => (
           <article key={result.id} className="rounded-lg border border-slate-100 bg-slate-50/50 p-5 transition-colors hover:border-orange-200 hover:bg-white group">
-            <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
+            <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-start">
               <div className="flex flex-col gap-3 flex-1 min-w-0">
-                <h3 className="text-xl font-bold text-slate-900 leading-tight">
+                <h3 className="break-words text-lg font-bold leading-tight text-slate-900 sm:text-xl">
                   {result.title}
                 </h3>
                 
@@ -198,19 +198,19 @@ export default function SearchHltv({ disciplineSlug }: { disciplineSlug: string 
                 </div>
               </div>
               
-              <div className="flex shrink-0 flex-wrap gap-3">
+              <div className="grid gap-2 sm:flex sm:flex-wrap xl:justify-end">
                 <a
                   href={result.url}
                   target="_blank"
                   rel="noreferrer"
-                  className="flex h-12 items-center justify-center px-6 rounded-xl border border-slate-200 bg-white text-[10px] font-black uppercase tracking-widest text-slate-900 hover:bg-slate-50 transition-all"
+                  className="flex h-11 min-w-0 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-[10px] font-black uppercase tracking-widest text-slate-900 transition-all hover:bg-slate-50 sm:px-6"
                 >
                   HLTV
                 </a>
                 <button
                   onClick={() => handleImport(result)}
                   disabled={!!importingId}
-                  className="flex h-12 items-center justify-center px-10 rounded-xl bg-slate-950 text-[10px] font-black uppercase tracking-widest text-white hover:bg-orange-600 transition-all disabled:opacity-50 shadow-lg shadow-slate-200"
+                  className="flex h-11 min-w-0 items-center justify-center rounded-xl bg-slate-950 px-4 text-[10px] font-black uppercase tracking-widest text-white shadow-lg shadow-slate-200 transition-all hover:bg-orange-600 disabled:opacity-50 sm:px-8"
                 >
                   {importingId === result.id ? "ЗАГРУЗКА..." : "ЗАГРУЗИТЬ"}
                 </button>

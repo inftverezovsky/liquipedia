@@ -241,13 +241,11 @@ async function scrapeHltv() {
 
       const events = [];
       const today = new Date();
-      
-      // We'll process top results to get their dates by visiting their pages
-      // This is necessary because HLTV search doesn't show dates anymore
-      const topResults = results.slice(0, 8);
+      const enrichSearchResults = process.env.HLTV_SEARCH_ENRICH === '1';
+      const topResults = results.slice(0, 15);
       
       for (const item of topResults) {
-        if (events.length >= 8) break;
+        if (events.length >= 15) break;
         const { id, title, href, dates: rawDates } = item;
         
         let cleanTitle = title
@@ -259,45 +257,46 @@ async function scrapeHltv() {
         let finalDates = rawDates;
         let pageStatus = "unknown";
         
-        try {
-          console.error(`[HLTV Playwright] Checking event status/date: ${cleanTitle} (${id})`);
-          // ANTI-BOT: Use same page, add human delay, no new tabs
-          await new Promise(r => setTimeout(r, 900 + Math.random() * 1200));
-          await page.goto('https://www.hltv.org' + href, { waitUntil: 'domcontentloaded', timeout: 20000 });
-          await new Promise(r => setTimeout(r, 700 + Math.random() * 800));
-          
-          const pageDetails = await page.evaluate(() => {
-            const indicator = document.querySelector('.event-hub-indicator');
-            const indicatorText = indicator?.textContent?.trim().toLowerCase() || "";
-            const indicatorClass = String(indicator?.className || "").toLowerCase();
-            const dateCandidates = Array.from(document.querySelectorAll('.event-header-component .eventdate, .eventdate, .event-date, [class*="event-date"], .standard-box .date'))
-              .map((el) => el.textContent?.trim().replace(/\s+/g, ' ') || "")
-              .filter((text) => text && !/^date$/i.test(text));
+        if (enrichSearchResults) {
+          try {
+            console.error(`[HLTV Playwright] Checking event status/date: ${cleanTitle} (${id})`);
+            await new Promise(r => setTimeout(r, 500 + Math.random() * 700));
+            await page.goto('https://www.hltv.org' + href, { waitUntil: 'domcontentloaded', timeout: 8000 });
+            await new Promise(r => setTimeout(r, 300 + Math.random() * 500));
+            
+            const pageDetails = await page.evaluate(() => {
+              const indicator = document.querySelector('.event-hub-indicator');
+              const indicatorText = indicator?.textContent?.trim().toLowerCase() || "";
+              const indicatorClass = String(indicator?.className || "").toLowerCase();
+              const dateCandidates = Array.from(document.querySelectorAll('.event-header-component .eventdate, .eventdate, .event-date, [class*="event-date"], .standard-box .date'))
+                .map((el) => el.textContent?.trim().replace(/\s+/g, ' ') || "")
+                .filter((text) => text && !/^date$/i.test(text));
 
-            let status = "unknown";
-            if (indicatorClass.includes('event-ended') || indicatorText.includes('finished') || indicatorText.includes('ended')) {
-              status = "finished";
-            } else if (indicatorClass.includes('event-live') || indicatorText.includes('live') || indicatorText.includes('ongoing')) {
-              status = "ongoing";
-            } else if (indicatorClass.includes('event-upcoming') || indicatorText.includes('upcoming')) {
-              status = "upcoming";
+              let status = "unknown";
+              if (indicatorClass.includes('event-ended') || indicatorText.includes('finished') || indicatorText.includes('ended')) {
+                status = "finished";
+              } else if (indicatorClass.includes('event-live') || indicatorText.includes('live') || indicatorText.includes('ongoing')) {
+                status = "ongoing";
+              } else if (indicatorClass.includes('event-upcoming') || indicatorText.includes('upcoming')) {
+                status = "upcoming";
+              }
+
+              return {
+                status,
+                dates: dateCandidates[0] || "",
+              };
+            });
+            
+            pageStatus = pageDetails.status;
+            if (pageDetails.dates) {
+              finalDates = pageDetails.dates;
             }
-
-            return {
-              status,
-              dates: dateCandidates[0] || "",
-            };
-          });
-          
-          pageStatus = pageDetails.status;
-          if (pageDetails.dates) {
-            finalDates = pageDetails.dates;
+          } catch (e) {
+            console.error(`[HLTV Playwright] Failed to fetch status/date for ${id}: ${e.message}`);
           }
-        } catch (e) {
-          console.error(`[HLTV Playwright] Failed to fetch status/date for ${id}: ${e.message}`);
         }
 
-        if (!shouldKeepEvent({ title: cleanTitle, href, dates: finalDates || rawDates, status: pageStatus }, QUERY, today)) continue;
+        if (enrichSearchResults && !shouldKeepEvent({ title: cleanTitle, href, dates: finalDates || rawDates, status: pageStatus }, QUERY, today)) continue;
 
         const formattedDates = finalDates && finalDates !== "Date TBD" ? formatHltvDate(finalDates, today) : formatHltvDate(rawDates, today);
 

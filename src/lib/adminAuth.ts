@@ -26,7 +26,7 @@ export async function createAdminSessionResponse(payload: Record<string, unknown
   response.cookies.set(ADMIN_SESSION_COOKIE, token, {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: shouldUseSecureAdminCookie(),
     path: "/",
     maxAge: SESSION_TTL_SECONDS,
   });
@@ -62,7 +62,7 @@ export function createAdminLogoutResponse() {
   response.cookies.set(ADMIN_SESSION_COOKIE, "", {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: shouldUseSecureAdminCookie(),
     path: "/",
     maxAge: 0,
   });
@@ -97,6 +97,10 @@ function safeEqual(a: string, b: string) {
   const bBuffer = Buffer.from(b);
 
   return aBuffer.length === bBuffer.length && timingSafeEqual(aBuffer, bBuffer);
+}
+
+function shouldUseSecureAdminCookie() {
+  return process.env.ADMIN_COOKIE_SECURE === "true";
 }
 
 function getCookie(cookieHeader: string, name: string) {

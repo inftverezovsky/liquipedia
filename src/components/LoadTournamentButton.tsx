@@ -60,12 +60,12 @@ export default function LoadTournamentButton({
   }
 
   return (
-    <div className="space-y-2">
+    <div className="min-w-0 space-y-2">
       <button
         type="button"
         onClick={loadTournament}
         disabled={loading}
-        className="rounded-xl bg-slate-500/5 backdrop-blur-sm px-5 py-2.5 text-sm font-medium text-slate-600 border border-slate-200/50 hover:bg-slate-500/10 disabled:cursor-not-allowed disabled:opacity-50 transition-all"
+        className="flex min-h-11 w-full min-w-0 items-center justify-center rounded-xl border border-slate-200/50 bg-slate-500/5 px-4 py-2.5 text-center text-sm font-medium text-slate-600 backdrop-blur-sm transition-all hover:bg-slate-500/10 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:px-5"
       >
         {loading ? (force ? "Обновляю..." : "Загружаю...") : force ? "Обновить данные" : initialTournamentId ? "Открыть" : "Загрузить данные"}
       </button>

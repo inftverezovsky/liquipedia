@@ -17,6 +17,9 @@ const eslintConfig = [
       "dist/**",
       "out/**",
       "public/**",
+      "test-results/**",
+      "playwright-report/**",
+      "blob-report/**",
     ],
   },
 ];

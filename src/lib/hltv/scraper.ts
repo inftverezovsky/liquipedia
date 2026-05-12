@@ -308,14 +308,14 @@ async function getHltvProxyCandidate(attempt: number): Promise<HltvProxyCandidat
 
 function getMaxAttempts(mode: HltvMode) {
   if (mode === "health") return 1;
-  if (mode === "search") return 2;
+  if (mode === "search") return 1;
   if (mode === "events" || mode === "scrape") return 2;
   return 3;
 }
 
 function getTimeoutMs(mode: HltvMode) {
   if (mode === "health") return 30000;
-  if (mode === "search") return 75000;
+  if (mode === "search") return 45000;
   if (mode === "events" || mode === "scrape") return 90000;
   return 120000;
 }

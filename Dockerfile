@@ -22,9 +22,6 @@ FROM node:24-slim AS runner
 
 WORKDIR /app
 
-# Install openssl for Prisma
-RUN apt-get update -y && apt-get install -y openssl ca-certificates && rm -rf /var/lib/apt/lists/*
-
 ENV NODE_ENV production
 ENV NEXT_TELEMETRY_DISABLED 1
 
@@ -34,6 +31,14 @@ COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/prisma ./prisma
+COPY --from=builder /app/public ./public
+COPY --from=builder /app/scripts ./scripts
+
+# Install openssl for Prisma plus Chromium and system dependencies for Playwright.
+RUN apt-get update -y && \
+    apt-get install -y openssl ca-certificates && \
+    npx playwright install --with-deps chromium && \
+    rm -rf /var/lib/apt/lists/*
 
 # Expose the local app port. Railway still injects PORT at runtime.
 EXPOSE 3010

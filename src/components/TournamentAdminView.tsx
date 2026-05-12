@@ -44,7 +44,7 @@ export default function TournamentAdminView({ tournament: initialTournament, map
   );
 
   useEffect(() => {
-    mutate(initialTournament, { revalidate: false });
+    mutate(initialTournament, { revalidate: true });
   }, [initialTournament, mutate]);
 
   useEffect(() => {

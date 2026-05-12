@@ -18,6 +18,7 @@ type Match = {
   scoreB: number | null;
   stage: string | null;
   round: string | null;
+  format?: string | null;
   status: string | null;
   syncedAt: Date | string | null;
   rawText: string | null;
@@ -68,6 +69,20 @@ function isMatchPlaceholder(match: Match) {
   );
 }
 
+function hasExactVisibleTime(match: Match) {
+  return /\b\d{1,2}:\d{2}\b/.test(match.matchDateTime || "");
+}
+
+function isGeneratedScheduleMatrixRow(match: Match) {
+  if (isMatchPlaceholder(match)) return false;
+  if (getMatchDateObj(match)) return false;
+  if (hasExactVisibleTime(match)) return false;
+
+  const rawText = String(match.rawText || "").toLowerCase();
+  const format = String(match.format || "").toLowerCase().trim();
+  return format === "round robin" || rawText.includes("crosstable");
+}
+
 export default function MatchList({
   matches,
   mappings,
@@ -99,6 +114,10 @@ export default function MatchList({
 
     return [...matches]
       .filter(m => {
+        // Liquipedia crosstable rows are schedule matrix hints, not exact
+        // upload-ready matches. TBD slots are preserved separately.
+        if (isGeneratedScheduleMatrixRow(m)) return false;
+
         // 1. Скрываем матчи с результатами
         if (m.scoreA !== null || m.scoreB !== null) return false;
 

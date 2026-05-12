@@ -43,6 +43,78 @@ test("dedupeTournamentMatches keeps repeated undated pairs in different rounds",
   assert.equal(matches.length, 2);
 });
 
+test("dedupeTournamentMatches removes generated crosstable slots covered by scheduled matches", () => {
+  const matches = dedupeTournamentMatches([
+    {
+      matchId: "scheduled",
+      teamAName: "Virtus.pro",
+      teamBName: "Team Falcons",
+      matchDate: new Date("2026-05-13T10:00:00.000Z"),
+      matchDateTime: "May 13, 2026 - 12:00 CEST",
+      rawText: "<div class=\"brkts-matchlist-match\"></div>",
+    },
+    {
+      matchId: "generated-crosstable",
+      teamAName: "Virtus.pro",
+      teamBName: "Team Falcons",
+      matchDate: null,
+      matchDateTime: null,
+      stage: "Group Stage",
+      round: "Group A",
+      format: "Round robin",
+      status: "upcoming",
+      rawText: "<table class=\"crosstable\"><tr class=\"crosstable-tr\"></tr></table>",
+    },
+  ]);
+
+  assert.equal(matches.length, 1);
+  assert.equal(matches[0].matchId, "scheduled");
+});
+
+test("dedupeTournamentMatches keeps generated crosstable slots until a schedule exists", () => {
+  const matches = dedupeTournamentMatches([
+    {
+      matchId: "generated-crosstable",
+      teamAName: "Virtus.pro",
+      teamBName: "Team Falcons",
+      matchDate: null,
+      matchDateTime: null,
+      stage: "Group Stage",
+      round: "Group A",
+      format: "Round robin",
+      status: "upcoming",
+      rawText: "<table class=\"crosstable\"><tr class=\"crosstable-tr\"></tr></table>",
+    },
+  ]);
+
+  assert.equal(matches.length, 1);
+});
+
+test("dedupeTournamentMatches collapses same visible time with and without timezone suffix", () => {
+  const matches = dedupeTournamentMatches([
+    {
+      matchId: "html",
+      teamAName: "Team Falcons",
+      teamBName: "Virtus.pro",
+      matchDate: new Date("2026-05-13T10:00:00.000Z"),
+      matchDateTime: "May 13, 2026 - 12:00 CEST",
+      stage: "May 13-A",
+      rawText: "<div class=\"brkts-matchlist-match\"></div>",
+    },
+    {
+      matchId: "wikitext",
+      teamAName: "Virtus.pro",
+      teamBName: "Team Falcons",
+      matchDate: new Date("2026-05-13T15:00:00.000Z"),
+      matchDateTime: "May 13, 2026 - 12:00",
+    },
+  ]);
+
+  assert.equal(matches.length, 1);
+  assert.equal(matches[0].matchId, "html");
+  assert.deepEqual(matches[0].matchDate, new Date("2026-05-13T10:00:00.000Z"));
+});
+
 test("dedupeTournamentMatches prefers richer duplicate records and fills missing fields", () => {
   const datedMatches = dedupeTournamentMatches([
     {

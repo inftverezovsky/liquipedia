@@ -71,6 +71,10 @@ export function cleanWikiValue(value?: string | null) {
     previous = output;
     output = output.replace(/\{\{([^{}]+)\}\}/g, (_match, inner: string) => {
       const parts = inner.split("|").map((part) => part.trim()).filter(Boolean);
+      const templateName = parts[0] ?? "";
+      const slashAbbr = templateName.match(/^abbr\/(.+)$/i);
+      if (slashAbbr?.[1]) return slashAbbr[1].trim();
+      if (/^abbr$/i.test(templateName) && parts[1]) return parts[1];
       const positional = parts.slice(1).find((part) => !part.includes("="));
       const named = parts.slice(1).find((part) => part.includes("=") && part.split("=")[1]?.trim());
       if (positional) return positional;
@@ -94,18 +98,43 @@ export function parseWikiDate(value?: string | null) {
   if (!cleaned) return null;
 
   // 1. Try ISO-like: 2026-05-10 12:00
-  const isoWithTime = cleaned.match(/(20\d{2}|19\d{2})[-/]([01]?\d)[-/]([0-3]?\d)[ T]([0-2]?\d):([0-5]\d)(?::([0-5]\d))?/);
+  const isoWithTime = cleaned.match(/(20\d{2}|19\d{2})[-/]([01]?\d)[-/]([0-3]?\d)[ T]([0-2]?\d):([0-5]\d)(?::([0-5]\d))?(?:\s*(Z|UTC|GMT|[A-Z]{2,5}|[+-][0-2]\d:?[\d]{2}))?/i);
   if (isoWithTime) {
-    const [, year, month, day, hour, min, sec] = isoWithTime;
+    const [, year, month, day, hour, min, sec, timezone] = isoWithTime;
+    const timezoneDate = buildTimezoneAwareDate(
+      Number(year),
+      Number(month),
+      Number(day),
+      Number(hour),
+      Number(min),
+      Number(sec || 0),
+      timezone
+    );
+    if (timezoneDate) return timezoneDate;
+
     const date = new Date(`${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}T${hour.padStart(2, "0")}:${min.padStart(2, "0")}:${(sec || "00").padStart(2, "0")}Z`);
-    date.setUTCHours(date.getUTCHours() + 3); 
+    date.setUTCHours(date.getUTCHours() + 3);
     return date;
   }
 
   // 2. Try English format: May 10, 2026 - 12:00
-  const englishWithTime = cleaned.match(/([a-zA-Z]+)\s+([0-3]?\d),?\s+(20\d{2}|19\d{2})\s*-\s*([0-2]?\d):([0-5]\d)/);
+  const englishWithTime = cleaned.match(/([a-zA-Z]+)\s+([0-3]?\d),?\s+(20\d{2}|19\d{2})\s*-\s*([0-2]?\d):([0-5]\d)(?:\s*(Z|UTC|GMT|[A-Z]{2,5}|[+-][0-2]\d:?[\d]{2}))?/i);
   if (englishWithTime) {
-    const [, monthStr, day, year, hour, min] = englishWithTime;
+    const [, monthStr, day, year, hour, min, timezone] = englishWithTime;
+    const month = parseEnglishMonth(monthStr);
+    if (month) {
+      const timezoneDate = buildTimezoneAwareDate(
+        Number(year),
+        month,
+        Number(day),
+        Number(hour),
+        Number(min),
+        0,
+        timezone
+      );
+      if (timezoneDate) return timezoneDate;
+    }
+
     const date = new Date(`${monthStr} ${day}, ${year} ${hour}:${min}:00 UTC`);
     if (!isNaN(date.getTime())) {
       date.setUTCHours(date.getUTCHours() + 3);
@@ -131,6 +160,65 @@ export function parseWikiDate(value?: string | null) {
   }
 
   return null;
+}
+
+function buildTimezoneAwareDate(
+  year: number,
+  month: number,
+  day: number,
+  hour: number,
+  minute: number,
+  second: number,
+  timezone?: string | null
+) {
+  const offsetMinutes = parseTimezoneOffsetMinutes(timezone);
+  if (offsetMinutes === null) return null;
+
+  const utcMs = Date.UTC(year, month - 1, day, hour, minute, second) - offsetMinutes * 60_000;
+  const date = new Date(utcMs);
+  return Number.isFinite(date.getTime()) ? date : null;
+}
+
+function parseTimezoneOffsetMinutes(timezone?: string | null) {
+  if (!timezone) return null;
+  const normalized = timezone.trim().toUpperCase();
+  if (!normalized) return null;
+  if (normalized === "Z" || normalized === "UTC" || normalized === "GMT") return 0;
+
+  const numeric = normalized.match(/^([+-])([0-2]\d):?([0-5]\d)$/);
+  if (numeric) {
+    const [, sign, hour, minute] = numeric;
+    const value = Number(hour) * 60 + Number(minute);
+    return sign === "-" ? -value : value;
+  }
+
+  const offsets: Record<string, number> = {
+    CET: 60,
+    CEST: 120,
+    EET: 120,
+    EEST: 180,
+    MSK: 180,
+    UTC: 0,
+    GMT: 0,
+    BST: 60,
+    PST: -480,
+    PDT: -420,
+    MST: -420,
+    MDT: -360,
+    CST: -360,
+    CDT: -300,
+    EST: -300,
+    EDT: -240,
+  };
+
+  return offsets[normalized] ?? null;
+}
+
+function parseEnglishMonth(month: string) {
+  const normalized = month.trim().toLowerCase().slice(0, 3);
+  const months = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+  const index = months.indexOf(normalized);
+  return index >= 0 ? index + 1 : null;
 }
 
 export function parseInteger(value?: string | null) {

@@ -28,8 +28,18 @@ export interface MatchDedupeInput {
 export function dedupeTournamentMatches<T extends MatchDedupeInput>(matches: readonly T[]): T[] {
   const byKey = new Map<string, T>();
   const keys: string[] = [];
+  const scheduledPairKeys = new Set(
+    matches
+      .filter((match) => !hasPlaceholderSide(match) && parseDateLike(match.matchDate))
+      .map(getPairOnlyKey)
+      .filter(Boolean)
+  );
 
   for (const match of matches) {
+    if (isCoveredGeneratedRoundRobinSlot(match, scheduledPairKeys)) {
+      continue;
+    }
+
     const key = getCanonicalMatchKey(match);
     const existing = byKey.get(key);
 
@@ -128,17 +138,38 @@ function getTeamKey(name: string | null | undefined, id: string | null | undefin
 }
 
 function getDateBucket(match: MatchDedupeInput) {
+  const textDate = getComparableDateText(match.matchDateTime);
+  if (textDate) {
+    return `text-time:${textDate}`;
+  }
+
   const parsedDate = parseDateLike(match.matchDate);
   if (parsedDate) {
     return `minute:${Math.floor(parsedDate.getTime() / 60000)}`;
   }
 
-  const textDate = normalizeLoose(match.matchDateTime);
-  if (textDate && !/^(date|date tbd|tbd|-|unknown)$/i.test(textDate)) {
-    return `text:${textDate}`;
+  const looseTextDate = normalizeLoose(match.matchDateTime);
+  if (looseTextDate && !/^(date|date tbd|tbd|-|unknown)$/i.test(looseTextDate)) {
+    return `text:${looseTextDate}`;
   }
 
   return "date:tbd";
+}
+
+function getComparableDateText(value: string | null | undefined) {
+  const normalized = normalizeLoose(value)
+    .replace(/\s*\([^)]*\butc[+-]?\d*[^)]*\)\s*$/i, "")
+    .replace(/\s+(?:z|utc|gmt|[a-z]{2,5}|[+-][0-2]\d:?[0-5]\d)\s*$/i, "")
+    .replace(/[,]/g, "")
+    .replace(/\s*[-–—]\s*/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!normalized || /^(date|date tbd|tbd|-|unknown)$/i.test(normalized)) {
+    return "";
+  }
+
+  return /\b\d{1,2}:\d{2}\b/.test(normalized) ? normalized : "";
 }
 
 function parseDateLike(value: Date | string | number | null | undefined) {
@@ -161,6 +192,42 @@ function hasRealTeam(name: string | null | undefined) {
 
 function hasPlaceholderSide(match: MatchDedupeInput) {
   return isPlaceholderTeam(match.teamAName) || isPlaceholderTeam(match.teamBName);
+}
+
+function isCoveredGeneratedRoundRobinSlot(match: MatchDedupeInput, scheduledPairKeys: Set<string>) {
+  if (hasPlaceholderSide(match)) return false;
+  if (parseDateLike(match.matchDate)) return false;
+
+  const textDate = normalizeLoose(match.matchDateTime);
+  if (textDate && !/^(date|date tbd|tbd|-|unknown)$/i.test(textDate)) return false;
+
+  const hasScore = match.scoreA !== null && match.scoreA !== undefined
+    || match.scoreB !== null && match.scoreB !== undefined;
+  if (hasScore) return false;
+
+  const status = normalizeLoose(match.status);
+  if (status && status !== "upcoming" && status !== "scheduled") return false;
+
+  const isGeneratedRoundRobin =
+    normalizeLoose(match.format) === "round robin"
+    || normalizeLoose(match.rawText).includes("crosstable");
+  if (!isGeneratedRoundRobin) return false;
+
+  const pairKey = getPairOnlyKey(match);
+  return Boolean(pairKey && scheduledPairKeys.has(pairKey));
+}
+
+function getPairOnlyKey(match: MatchDedupeInput) {
+  const [team1, team2] = [
+    getTeamKey(match.teamAName, match.teamAId, "a"),
+    getTeamKey(match.teamBName, match.teamBId, "b")
+  ].sort();
+
+  if (!team1 || !team2 || team1.startsWith("unknown-") || team2.startsWith("unknown-")) {
+    return "";
+  }
+
+  return `${team1}|${team2}`;
 }
 
 function hasValue(value: unknown) {

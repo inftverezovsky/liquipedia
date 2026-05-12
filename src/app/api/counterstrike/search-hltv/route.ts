@@ -29,12 +29,14 @@ export async function GET(request: Request) {
     });
   } catch (error: any) {
     const errorClass = normalizeHltvErrorClass(error.errorClass, error.message);
+    const userMessage = getHltvSearchErrorMessage(errorClass, error.message);
     console.error('[HLTV Search API] Error:', error);
     return NextResponse.json({
       ok: false,
-      error: error.message,
+      error: userMessage,
+      debugError: error.message,
       errorClass,
-      userMessage: getHltvSearchErrorMessage(errorClass, error.message),
+      userMessage,
     }, { status: 500 });
   }
 }

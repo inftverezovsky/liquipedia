@@ -50,7 +50,7 @@ test("Liquipedia normalizers preserve pure placeholder bracket slots for future 
   }
 });
 
-test("Counter-Strike and LoL normalizers extract crosstable round-robin pairs", () => {
+test("Counter-Strike and LoL normalizers ignore crosstable matrix rows as match sources", () => {
   const html = `
     <div class="mw-heading mw-heading2"><h2>Group Stage</h2></div>
     <div class="mw-heading mw-heading3"><h3>Group A</h3></div>
@@ -83,8 +83,6 @@ test("Counter-Strike and LoL normalizers extract crosstable round-robin pairs", 
     parsedHtml: html.replaceAll("/counterstrike/", "/leagueoflegends/"),
   });
 
-  assert.equal(cs.matches.length, 1);
-  assert.equal(lol.matches.length, 1);
-  assert.equal(cs.matches[0].round, "Group A");
-  assert.equal(lol.matches[0].stage, "Group Stage");
+  assert.equal(cs.matches.length, 0);
+  assert.equal(lol.matches.length, 0);
 });

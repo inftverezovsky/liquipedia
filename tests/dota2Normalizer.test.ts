@@ -45,7 +45,7 @@ test("Dota2 normalizer does not treat regional qualifier tabs as event subpages"
   assert.deepEqual(normalized.subPages, ["https://liquipedia.net/dota2/DreamLeague/29/Playoffs"]);
 });
 
-test("Dota2 normalizer extracts round-robin pairs from crosstable", () => {
+test("Dota2 normalizer ignores crosstable matrix rows as match sources", () => {
   const html = `
     <div class="mw-heading mw-heading2"><h2>Group Stage</h2></div>
     <div class="mw-heading mw-heading3"><h3>Group A</h3></div>
@@ -80,14 +80,40 @@ test("Dota2 normalizer extracts round-robin pairs from crosstable", () => {
     parsedHtml: html,
   });
 
-  assert.equal(normalized.matches.length, 3);
+  assert.equal(normalized.matches.length, 0);
+});
+
+test("Dota2 normalizer keeps scored crosstable results", () => {
+  const html = `
+    <div class="mw-heading mw-heading2"><h2>Group Stage</h2></div>
+    <div class="mw-heading mw-heading3"><h3>Group A</h3></div>
+    <div><div class="template-box">
+      <table class="crosstable">
+        <tr class="crosstable-tr">
+          <th><a href="/dota2/Team_Alpha" title="Team Alpha">Team Alpha</a></th>
+          <td class="crosstable-bgc-cross"></td>
+          <td>2 - 1</td>
+        </tr>
+        <tr class="crosstable-tr">
+          <th><a href="/dota2/Team_Beta" title="Team Beta">Team Beta</a></th>
+          <td>1 - 2</td>
+          <td class="crosstable-bgc-cross"></td>
+        </tr>
+      </table>
+    </div></div>
+  `;
+
+  const normalized = normalizeDota2Tournament({
+    title: "DreamLeague/29",
+    pageUrl: "https://liquipedia.net/dota2/DreamLeague/29",
+    wikitext: "{{Infobox league|name=DreamLeague Season 29|sdate=2026-05-13|edate=2026-05-24}}",
+    parsedHtml: html,
+  });
+
+  assert.equal(normalized.matches.length, 1);
   assert.deepEqual(
-    normalized.matches.map((match) => [match.teamAName, match.teamBName, match.stage, match.round]),
-    [
-      ["Team Alpha", "PlayTime", "Group Stage", "Group A"],
-      ["Team Alpha", "Team Gamma", "Group Stage", "Group A"],
-      ["PlayTime", "Team Gamma", "Group Stage", "Group A"],
-    ],
+    [normalized.matches[0].teamAName, normalized.matches[0].teamBName, normalized.matches[0].scoreA, normalized.matches[0].scoreB],
+    ["Team Alpha", "Team Beta", 2, 1],
   );
 });
 

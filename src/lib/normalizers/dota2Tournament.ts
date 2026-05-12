@@ -357,9 +357,8 @@ function extractMatchesFromParsedHtml(html: string, pageUrl: string): Normalized
     if (matches.length >= 500) return false;
   });
 
-  // 2. Extract generated round-robin pairings from Liquipedia crosstables.
-  // These tables often appear before exact times are published, so they produce
-  // valid team pairs with unknown dates rather than pretending there are no matches.
+  // 2. Extract completed round-robin results from Liquipedia crosstables.
+  // Scoreless cells are schedule matrix hints, not exact matches.
   $("table.crosstable").each((_, tableEl) => {
     const $table = $(tableEl);
     const groupName = findPreviousHeadingForElement(tableEl, ".mw-heading3, h3");
@@ -385,6 +384,8 @@ function extractMatchesFromParsedHtml(html: string, pageUrl: string): Normalized
         if (!cell.length || cell.hasClass("crosstable-bgc-cross")) continue;
 
         const score = parseScoreText(cell.text());
+        if (!score) continue;
+
         matches.push({
           stage: stageName,
           round: groupName || null,
@@ -392,10 +393,10 @@ function extractMatchesFromParsedHtml(html: string, pageUrl: string): Normalized
           matchDateTime: null,
           teamAName: rows[rowIndex].teamName,
           teamBName: rows[colIndex].teamName,
-          scoreA: score?.[0] ?? null,
-          scoreB: score?.[1] ?? null,
+          scoreA: score[0],
+          scoreB: score[1],
           format: "Round robin",
-          status: score ? "finished" : "upcoming",
+          status: "finished",
           court: null,
           sourceUrl: pageUrl,
           rawText: [rows[rowIndex].raw, $.html(cell)?.slice(0, 1000), rows[colIndex].raw].filter(Boolean).join("\n")

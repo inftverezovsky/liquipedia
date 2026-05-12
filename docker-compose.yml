@@ -1,33 +1,35 @@
+name: tcyber
+
 services:
   postgres:
     image: postgres:16
-    container_name: liquipedia-postgres
+    container_name: tcyber-postgres
     restart: always
     environment:
-      POSTGRES_USER: liquipedia
-      POSTGRES_PASSWORD: liquipedia
-      POSTGRES_DB: liquipedia
+      POSTGRES_USER: tcyber
+      POSTGRES_PASSWORD: tcyber
+      POSTGRES_DB: tcyber
     ports:
       - "5434:5432"
     volumes:
-      - liquipedia_postgres_data:/var/lib/postgresql/data
+      - tcyber_postgres_data:/var/lib/postgresql/data
 
   web:
     build: .
-    container_name: liquipedia-web
+    container_name: tcyber-web
     restart: always
     ports:
       - "3010:3010"
     environment:
-      DATABASE_URL: postgresql://liquipedia:liquipedia@postgres:5432/liquipedia?schema=public
-      LIQUIPEDIA_USER_AGENT: "liquipedia-local-docker/0.1 (local development; contact@example.com)"
+      DATABASE_URL: postgresql://tcyber:tcyber@postgres:5432/tcyber?schema=public
+      LIQUIPEDIA_USER_AGENT: "tcyber-local-docker/0.1 (local development; contact@example.com)"
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-63016}
-      ADMIN_SESSION_SECRET: ${ADMIN_SESSION_SECRET:-liquipedia-admin-session-secret}
+      ADMIN_SESSION_SECRET: ${ADMIN_SESSION_SECRET:-tcyber-admin-session-secret}
       ADMIN_COOKIE_SECURE: ${ADMIN_COOKIE_SECURE:-false}
       PORT: 3010
     volumes:
       - ./certs:/app/certs:ro
-      - liquipedia_cache:/app/cache
+      - tcyber_cache:/app/cache
     depends_on:
       - postgres
     healthcheck:
@@ -38,5 +40,5 @@ services:
       start_period: 60s
 
 volumes:
-  liquipedia_postgres_data:
-  liquipedia_cache:
+  tcyber_postgres_data:
+  tcyber_cache:

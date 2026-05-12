@@ -50,7 +50,7 @@ docker compose up -d --build
 ### Проверка
 ```bash
 docker compose ps
-docker logs liquipedia-web --tail 100
+docker logs tcyber-web --tail 100
 ```
 
 ### Открыть в браузере

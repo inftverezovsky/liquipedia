@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
 
 export async function GET() {
-  return NextResponse.json({ ok: true, app: "liquipedia", timestamp: new Date().toISOString() });
+  return NextResponse.json({ ok: true, app: "tcyber", timestamp: new Date().toISOString() });
 }

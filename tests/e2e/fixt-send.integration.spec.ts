@@ -120,7 +120,7 @@ async function loginAndGetCookie(request: APIRequestContext) {
   await expect(login).toBeOK();
 
   const setCookie = login.headers()["set-cookie"];
-  expect(setCookie).toContain("liquipedia_admin_session=");
+  expect(setCookie).toContain("tcyber_admin_session=");
 
   return setCookie.split(";")[0];
 }

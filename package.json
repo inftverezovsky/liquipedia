@@ -1,8 +1,8 @@
 {
-  "name": "liquipedia",
+  "name": "tcyber",
   "version": "0.1.0",
   "private": true,
-  "description": "Manual Liquipedia Dota 2 tournament loader: search a tournament, select it, fetch via API, store raw snapshot, normalize and display.",
+  "description": "TCyber tournament admin hub: search tournaments, import matches, map teams, and send schedules to admin APIs.",
   "scripts": {
     "dev": "cross-env NODE_OPTIONS=--openssl-legacy-provider next dev -p 3010",
     "build": "prisma generate && next build",

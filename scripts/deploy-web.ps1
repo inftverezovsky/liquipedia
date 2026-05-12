@@ -1,6 +1,6 @@
 param(
   [string]$Server = "root@82.147.67.231",
-  [string]$RemoteDir = "/root/liquipedia"
+  [string]$RemoteDir = "/root/tcyber"
 )
 
 $ErrorActionPreference = "Stop"
@@ -8,9 +8,9 @@ $ErrorActionPreference = "Stop"
 $ProjectRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 Set-Location $ProjectRoot
 
-$archiveName = "liquipedia-deploy.tar.gz"
+$archiveName = "tcyber-deploy.tar.gz"
 $archivePath = Join-Path $ProjectRoot $archiveName
-$remoteScriptName = "liquipedia-remote-deploy.sh"
+$remoteScriptName = "tcyber-remote-deploy.sh"
 $remoteScriptPath = Join-Path $ProjectRoot $remoteScriptName
 
 $paths = @(
@@ -58,10 +58,10 @@ echo "==> Recreating web container"
 docker compose up -d --force-recreate web
 
 echo "==> Verifying Playwright browser inside container"
-docker exec liquipedia-web node -e "const fs=require('fs'); const { chromium }=require('playwright'); const p=chromium.executablePath(); console.log(p); fs.accessSync(p, fs.constants.X_OK);"
+docker exec tcyber-web node -e "const fs=require('fs'); const { chromium }=require('playwright'); const p=chromium.executablePath(); console.log(p); fs.accessSync(p, fs.constants.X_OK);"
 
 echo "==> Running containers"
-docker ps --filter name=liquipedia
+docker ps --filter name=tcyber
 "@ | Set-Content -Path $remoteScriptPath -Encoding ascii
 
 Write-Host "Uploading archive to ${Server}..." -ForegroundColor Cyan
@@ -73,7 +73,7 @@ scp $remoteScriptPath "${Server}:/root/$remoteScriptName"
 if ($LASTEXITCODE -ne 0) { throw "Remote script upload failed" }
 
 Write-Host "Unpacking and rebuilding web container..." -ForegroundColor Cyan
-ssh $Server "set -o pipefail; bash /root/$remoteScriptName 2>&1 | tee /root/liquipedia-deploy.log"
+ssh $Server "set -o pipefail; bash /root/$remoteScriptName 2>&1 | tee /root/tcyber-deploy.log"
 if ($LASTEXITCODE -ne 0) { throw "Remote deploy failed" }
 
 Write-Host "Done. Open http://82.147.67.231:3010 and press Ctrl+F5." -ForegroundColor Green

@@ -2,7 +2,7 @@ import { createHmac, timingSafeEqual } from "crypto";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 
-const ADMIN_SESSION_COOKIE = "liquipedia_admin_session";
+const ADMIN_SESSION_COOKIE = "tcyber_admin_session";
 const SESSION_TTL_SECONDS = 12 * 60 * 60;
 const SESSION_SIGNATURE_VERSION = "settings-password-v2";
 

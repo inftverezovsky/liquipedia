@@ -9,13 +9,13 @@ This avoids manual `scp`, manual archive uploads, and repeated command-line depl
 3. Click **Add stack**.
 4. Choose **Repository**.
 5. Set:
-   - **Name**: `liquipedia`
+   - **Name**: `tcyber`
    - **Repository URL**: your Git repository URL
    - **Compose path**: `docker-compose.yml`
    - **Branch**: your deploy branch, for example `main`
 6. In **Environment variables** add:
    - `ADMIN_PASSWORD=63016`
-   - `ADMIN_SESSION_SECRET=liquipedia-admin-session-secret`
+   - `ADMIN_SESSION_SECRET=tcyber-admin-session-secret`
    - `ADMIN_COOKIE_SECURE=false`
 7. Deploy the stack.
 
@@ -31,7 +31,7 @@ If Portainer shows a webhook URL for the stack, save it. Future deploys can be t
 
 - Do not use **Duplicate/Edit** for normal code deploys. It recreates a container from the existing image and may not rebuild the app.
 - Use **Stack update**, **Pull and redeploy**, or **Rebuild image**.
-- Keep the PostgreSQL volume. Do not delete the `liquipedia_postgres_data` volume unless you intentionally want to wipe the database.
+- Keep the PostgreSQL volume. Do not delete the `tcyber_postgres_data` volume unless you intentionally want to wipe the database.
 - If the site is served over plain HTTP, keep `ADMIN_COOKIE_SECURE=false`.
 - Use `ADMIN_COOKIE_SECURE=true` only after the site is behind HTTPS.
 
@@ -54,5 +54,4 @@ cd C:\Users\Sa1z1ngr0z\Desktop\liquipedia
 .\scripts\deploy-web.ps1
 ```
 
-This is a fallback, not the preferred long-term flow. It uploads a `tar.gz`, rebuilds the `web` image without cache, recreates `liquipedia-web`, and verifies Playwright Chromium inside the container.
-
+This is a fallback, not the preferred long-term flow. It uploads a `tar.gz`, rebuilds the `web` image without cache, recreates `tcyber-web`, and verifies Playwright Chromium inside the container.

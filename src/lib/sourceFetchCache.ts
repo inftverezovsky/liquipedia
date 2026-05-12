@@ -65,6 +65,22 @@ export async function findSourceFetchCache(input: SourceFetchCacheKey): Promise<
   });
 }
 
+export async function clearSourceFetchCache(input: SourceFetchCacheKey) {
+  const key = normalizeSourceFetchCacheKey(input);
+  const where: Record<string, string> = {
+    source: key.source,
+    disciplineSlug: key.disciplineSlug,
+    resourceType: key.resourceType,
+    resourceKey: key.resourceKey,
+  };
+
+  if (input.mode !== undefined) {
+    where.mode = key.mode;
+  }
+
+  return (prisma as any).sourceFetchCache.deleteMany({ where });
+}
+
 export async function markSourceFetchAttempt(input: SourceFetchCacheKey) {
   const key = normalizeSourceFetchCacheKey(input);
   const now = new Date();

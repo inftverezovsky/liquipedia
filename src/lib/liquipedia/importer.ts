@@ -1,6 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
-import { fetchPageWikitext, fetchPageParsed, fetchPageRevision } from "@/lib/liquipedia/client";
+import { clearCachedSearchPageMetadata, fetchPageWikitext, fetchPageParsed, fetchPageRevision } from "@/lib/liquipedia/client";
 import { dedupeTournamentMatches } from "@/lib/matches/dedupe";
 import type { NormalizedTournament } from "@/lib/normalizers/types";
 import { isPlaceholderTeam } from "@/lib/teams";
@@ -12,6 +12,7 @@ import {
   shouldKeepPreviousMatches,
 } from "@/lib/matches/quality";
 import {
+  clearSourceFetchCache,
   findSourceFetchCache,
   isSourceCacheFresh,
   isSourceCacheStaleUsable,
@@ -47,6 +48,24 @@ export async function importTournamentRecursive(params: {
 
   console.log(`[Importer] Starting optimized bulk import for ${title}`);
   const startTime = Date.now();
+  let forceCleanupStats: ForceRefreshCleanupStats | null = null;
+
+  if (force) {
+    forceCleanupStats = await clearTournamentForceRefreshState({
+      disciplineSlug,
+      pageId,
+      title,
+      pageUrl,
+    });
+    console.log(
+      `[Importer] Force refresh cleanup for ${title}: `
+      + `${forceCleanupStats.matchesDeleted} matches, `
+      + `${forceCleanupStats.participantsDeleted} participants, `
+      + `${forceCleanupStats.rawSnapshotsDeleted} snapshots, `
+      + `${forceCleanupStats.sourceFetchCachesDeleted} source cache rows, `
+      + `${forceCleanupStats.fileCachesDeleted} file caches.`
+    );
+  }
 
   // 1. Process Main Page (Does NOT insert matches anymore, just returns them)
   const mainResult = await processSinglePage({
@@ -194,6 +213,7 @@ export async function importTournamentRecursive(params: {
     qualityScore,
     warning: qualityGateWarning || mainResult.warning || null,
     qualityGateKeptPrevious,
+    forceCleanupStats,
   };
 }
 
@@ -232,6 +252,11 @@ async function processSinglePage(params: {
       resourceKey: titleKey(title),
       mode: "cache-first",
     };
+
+    if (force) {
+      await clearPageFetchCaches(disciplineSlug, title);
+    }
+
     let sourceCache: SourceFetchCacheRecord | null = !force
       ? await findSourceFetchCache(cacheInput)
       : null;
@@ -324,6 +349,10 @@ async function processSinglePage(params: {
         rawJson = page.raw;
         parsedHtml = html;
         currentPageId = page.pageId;
+
+        if (force && titleKey(pageTitle) !== titleKey(title)) {
+          await clearPageFetchCaches(disciplineSlug, pageTitle);
+        }
 
         const contentHash = createHash("sha1").update(wikitext).digest("hex");
         rawSnapshot = await prisma.rawSnapshot.create({
@@ -740,6 +769,124 @@ async function canonicalizeMatchesWithTournamentTeams(matches: any[], tournament
   for (const match of matches) {
     Object.assign(match, canonicalizeMatchTeams(match, canonicalizer));
   }
+}
+
+type ForceRefreshCleanupStats = {
+  tournamentId: string | null;
+  matchesDeleted: number;
+  participantsDeleted: number;
+  rawSnapshotsDeleted: number;
+  sourceFetchCachesDeleted: number;
+  fileCachesDeleted: number;
+};
+
+async function clearTournamentForceRefreshState(params: {
+  disciplineSlug: string;
+  pageId?: number;
+  title: string;
+  pageUrl?: string | null;
+}): Promise<ForceRefreshCleanupStats> {
+  const titleVariants = getTitleVariants(params.title, params.pageUrl, params.disciplineSlug);
+  const tournament = await prisma.tournament.findFirst({
+    where: {
+      disciplineSlug: params.disciplineSlug,
+      OR: [
+        { sourceTitle: { in: [...titleVariants] } },
+        ...(params.pageUrl ? [{ sourceUrl: params.pageUrl }] : []),
+        ...(params.pageId ? [{ sourcePageId: params.pageId }] : []),
+      ],
+    },
+    select: { id: true, sourceTitle: true },
+  });
+
+  if (tournament?.sourceTitle) {
+    for (const variant of getTitleVariants(tournament.sourceTitle, null, params.disciplineSlug)) {
+      titleVariants.add(variant);
+    }
+  }
+
+  let matchesDeleted = 0;
+  let participantsDeleted = 0;
+  if (tournament?.id) {
+    const [matches, participants] = await prisma.$transaction([
+      prisma.tournamentMatch.deleteMany({ where: { tournamentId: tournament.id } }),
+      prisma.tournamentParticipant.deleteMany({ where: { tournamentId: tournament.id } }),
+    ]);
+    matchesDeleted = matches.count;
+    participantsDeleted = participants.count;
+
+    await prisma.tournament.update({
+      where: { id: tournament.id },
+      data: {
+        extractionStatus: "PENDING",
+        normalization: {
+          forceRefresh: true,
+          cacheClearedAt: new Date().toISOString(),
+        } as Prisma.InputJsonValue,
+      },
+    }).catch(() => {});
+  }
+
+  const pageCacheStats = await Promise.all(
+    [...titleVariants].map((title) => clearPageFetchCaches(params.disciplineSlug, title))
+  );
+
+  return {
+    tournamentId: tournament?.id ?? null,
+    matchesDeleted,
+    participantsDeleted,
+    rawSnapshotsDeleted: pageCacheStats.reduce((sum, item) => sum + item.rawSnapshotsDeleted, 0),
+    sourceFetchCachesDeleted: pageCacheStats.reduce((sum, item) => sum + item.sourceFetchCachesDeleted, 0),
+    fileCachesDeleted: pageCacheStats.reduce((sum, item) => sum + item.fileCachesDeleted, 0),
+  };
+}
+
+async function clearPageFetchCaches(disciplineSlug: string, title: string) {
+  const titleVariants = getTitleVariants(title, null, disciplineSlug);
+  const [rawSnapshotsResult, sourceFetchResults] = await Promise.all([
+    prisma.rawSnapshot.deleteMany({
+      where: {
+        pageTitle: { in: [...titleVariants] },
+        OR: [
+          { disciplineSlug },
+          { disciplineSlug: null },
+        ],
+      },
+    }),
+    Promise.all([...titleVariants].map((variant) => clearSourceFetchCache({
+      source: "liquipedia",
+      disciplineSlug,
+      resourceType: "page",
+      resourceKey: titleKey(variant),
+    }))),
+  ]);
+
+  const fileCachesDeleted = [...titleVariants].reduce(
+    (count, variant) => count + clearCachedSearchPageMetadata(disciplineSlug, variant),
+    0
+  );
+
+  return {
+    rawSnapshotsDeleted: rawSnapshotsResult.count,
+    sourceFetchCachesDeleted: sourceFetchResults.reduce((sum, result) => sum + result.count, 0),
+    fileCachesDeleted,
+  };
+}
+
+function getTitleVariants(title: string, pageUrl: string | null | undefined, disciplineSlug: string) {
+  const variants = new Set<string>();
+  const add = (value?: string | null) => {
+    const cleaned = String(value || "").trim();
+    if (!cleaned) return;
+    variants.add(cleaned);
+    variants.add(cleaned.replace(/_/g, " "));
+    variants.add(cleaned.replace(/ /g, "_"));
+  };
+
+  add(title);
+  if (pageUrl) add(titleFromLiquipediaUrl(pageUrl, disciplineSlug));
+
+  return variants;
 }
 
 async function appendTournamentWarning(tournamentId: string, warning: string) {

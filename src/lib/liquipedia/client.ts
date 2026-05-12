@@ -360,6 +360,18 @@ function setCachedSearchPageMetadata(disciplineSlug: string, title: string, meta
   } catch {}
 }
 
+export function clearCachedSearchPageMetadata(disciplineSlug: string, title: string) {
+  try {
+    const cachePath = getSearchPageMetadataPath(disciplineSlug, title);
+    if (fs.existsSync(cachePath)) {
+      fs.unlinkSync(cachePath);
+      return 1;
+    }
+  } catch {}
+
+  return 0;
+}
+
 function getSearchPageMetadataPath(disciplineSlug: string, title: string) {
   const key = crypto.createHash("sha1").update(`${disciplineSlug}:${title}`).digest("hex");
   return path.join(process.cwd(), "cache", "liquipedia", "page-meta", `${key}.json`);

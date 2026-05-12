@@ -83,6 +83,7 @@ export async function POST(request: Request) {
       qualityScore: importResult.qualityScore,
       requestStats: importResult.requestStats,
       sourceBreakdown: importResult.sourceBreakdown,
+      forceCleanupStats: importResult.forceCleanupStats,
     });
   } catch (error) {
     console.error(error);

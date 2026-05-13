@@ -26,6 +26,7 @@ const POSITIVE_CACHE_TTL_BY_MODE = {
 };
 const NEGATIVE_CACHE_TTL = 10 * 60 * 1000;
 const STALE_CACHE_TTL = 24 * 60 * 60 * 1000;
+const SEARCH_RESULT_WAIT_MS = Number(process.env.HLTV_SEARCH_RESULT_WAIT_MS || 12000);
 
 function getCache(options = {}) {
   if (NO_CACHE) return null;
@@ -137,8 +138,13 @@ async function scrapeHltv() {
 
     const page = await context.newPage();
     
-    // Human-like random delay before starting. Keep health checks fast.
-    await new Promise(r => setTimeout(r, MODE === 'health' ? 250 + Math.random() * 750 : 3000 + Math.random() * 4000));
+    // Human-like random delay before starting. Keep health checks and search within API timeouts.
+    const startupDelayMs = MODE === 'health'
+      ? 250 + Math.random() * 750
+      : MODE === 'search'
+        ? 1000 + Math.random() * 2000
+        : 3000 + Math.random() * 4000;
+    await new Promise(r => setTimeout(r, startupDelayMs));
     
     // AGGRESSIVE OPTIMIZATION: Block images and media, but ALLOW stylesheets and scripts for Cloudflare
     await page.route('**/*', (route) => {
@@ -173,18 +179,23 @@ async function scrapeHltv() {
       await gotoHltvPage(page, `https://www.hltv.org/search?query=${encodeURIComponent(QUERY)}`, 'search');
       
       // Human-like reading pause
-      await new Promise(r => setTimeout(r, 2000 + Math.random() * 2000));
+      await new Promise(r => setTimeout(r, 750 + Math.random() * 1250));
       await safeMouseWheel(page, 0, 100 + Math.random() * 200, 'initial-search-scroll');
       
       try {
         // Wait specifically for event search results or no-results message
-        console.error(`[HLTV Playwright] Waiting for search elements (30s timeout)...`);
-        await page.waitForSelector('a[href^="/events/"], .no-results, .search-result, h2:has-text("Tournaments")', { timeout: 30000 });
+        console.error(`[HLTV Playwright] Waiting for search results (${SEARCH_RESULT_WAIT_MS}ms timeout)...`);
+        await page.waitForFunction(() => {
+          const eventLinks = document.querySelectorAll('a[href*="/events/"]').length;
+          const bodyText = document.body?.innerText?.toLowerCase() || '';
+          const hasNoResults = /no results|nothing found|did not match|no matches/.test(bodyText);
+          return eventLinks > 0 || hasNoResults;
+        }, null, { timeout: SEARCH_RESULT_WAIT_MS });
       } catch (e) {
         console.error(`[HLTV Playwright] Timeout waiting for selectors. Capturing debug screenshot...`);
         await saveDebugScreenshot(page, 'selector-timeout');
         await safeMouseWheel(page, 0, 500, 'selector-timeout-scroll');
-        await new Promise(r => setTimeout(r, 3000));
+        await new Promise(r => setTimeout(r, 1000));
         if (await isCloudflareChallenge(page)) {
           throw new Error('Cloudflare block/challenge detected on HLTV search page');
         }

@@ -1,6 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
-import { clearCachedSearchPageMetadata, fetchPageWikitext, fetchPageParsed, fetchPageRevision } from "@/lib/liquipedia/client";
+import { clearCachedSearchPageMetadata, fetchPageWikitext, fetchPageParsed, fetchPageRevision, getLiquipediaImportRequestOptions } from "@/lib/liquipedia/client";
 import { dedupeTournamentMatches } from "@/lib/matches/dedupe";
 import type { NormalizedTournament } from "@/lib/normalizers/types";
 import { isPlaceholderTeam } from "@/lib/teams";
@@ -244,6 +244,7 @@ async function processSinglePage(params: {
     let stale = false;
     let warning: string | null = null;
     let externalRequests = 0;
+    const requestOptions = getLiquipediaImportRequestOptions();
 
     const cacheInput = {
       source: "liquipedia",
@@ -294,7 +295,7 @@ async function processSinglePage(params: {
 
     if (!force && !rawSnapshot && sourceCache?.rawSnapshotId) {
       try {
-        const revision = await fetchPageRevision(apiUrl, disciplineSlug, { pageId, title });
+        const revision = await fetchPageRevision(apiUrl, disciplineSlug, { pageId, title }, requestOptions);
         externalRequests += 1;
         const revisionUnchanged = Boolean(revision.revisionId && sourceCache.revisionId === revision.revisionId);
         if (revisionUnchanged) {
@@ -339,16 +340,21 @@ async function processSinglePage(params: {
       await markSourceFetchAttempt(cacheInput);
 
       try {
-        const [page, html] = await Promise.all([
-          fetchPageWikitext(apiUrl, disciplineSlug, { pageId, title }),
-          fetchPageParsed(apiUrl, title)
-        ]);
-        externalRequests += 2;
+        const page = await fetchPageWikitext(apiUrl, disciplineSlug, { pageId, title }, requestOptions);
+        externalRequests += 1;
         wikitext = page.wikitext;
         pageTitle = page.title;
         rawJson = page.raw;
-        parsedHtml = html;
         currentPageId = page.pageId;
+
+        try {
+          parsedHtml = await fetchPageParsed(apiUrl, pageTitle, requestOptions);
+          externalRequests += 1;
+        } catch (parseError) {
+          const parseWarning = `Parsed HTML недоступен для ${pageTitle}: ${parseError instanceof Error ? parseError.message : "unknown error"}`;
+          warning = warning ? `${warning}; ${parseWarning}` : parseWarning;
+          console.warn(`[Importer] ${parseWarning}`);
+        }
 
         if (force && titleKey(pageTitle) !== titleKey(title)) {
           await clearPageFetchCaches(disciplineSlug, pageTitle);

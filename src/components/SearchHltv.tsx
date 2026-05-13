@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { Loader2, Calendar, Trash2 } from "lucide-react";
 import { getHltvSearchErrorMessage } from "@/lib/hltv/userFacingErrors";
 
+const HLTV_SEARCH_CLIENT_TIMEOUT_MS = 180000;
+
 type HltvEvent = {
   id: string;
   title: string;
@@ -34,7 +36,7 @@ export default function SearchHltv({ disciplineSlug }: { disciplineSlug: string 
     setResults([]);
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 70000);
+    const timeoutId = setTimeout(() => controller.abort(), HLTV_SEARCH_CLIENT_TIMEOUT_MS);
 
     try {
       const response = await fetch(`/api/${disciplineSlug}/search-hltv?query=${encodeURIComponent(query)}${force ? "&force=true" : ""}`, {
@@ -50,7 +52,7 @@ export default function SearchHltv({ disciplineSlug }: { disciplineSlug: string 
       setResults(data.results ?? []);
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') {
-        setError("HLTV не ответил за 70 секунд. Обычно это значит, что прокси слишком медленный или временно заблокирован.");
+        setError("HLTV не ответил за 180 секунд. Обычно это значит, что прокси слишком медленный или временно заблокирован.");
       } else {
         setError(getHltvSearchErrorMessage(null, err instanceof Error ? err.message : "Search error"));
       }

@@ -45,7 +45,7 @@ export default function LoadTournamentButton({
       const response = await fetch(`/api/${disciplineSlug}/import-tournament`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pageId, title, pageUrl, force: true, source: resolvedSource }),
+        body: JSON.stringify({ pageId, title, pageUrl, force, source: resolvedSource }),
         signal: controller.signal
       });
       clearTimeout(timeoutId);

@@ -174,6 +174,12 @@ async function executeScraper(mode: HltvMode, queryOrId?: string, requestId = "h
         bytesIn: stdout.length + stderr.length,
       });
 
+      if (shouldTryDirectFallback(errorClass, direct)) {
+        console.log(`[HLTV Scraper Lib] ${errorClass} through proxy, retrying once without proxy...`);
+        executeScraper(mode, queryOrId, requestId, 1, true, options).then(settleResolve, settleReject);
+        return;
+      }
+
       const relatedCache = mode === "search" ? readRelatedHltvSearchCache(queryOrId) : null;
       if (relatedCache) {
         console.log(`[HLTV Scraper Lib] Returning related HLTV search cache after timeout.`);
@@ -267,8 +273,8 @@ async function executeScraper(mode: HltvMode, queryOrId?: string, requestId = "h
           return;
         }
 
-        if (allowDirectFallback() && !direct && errorClass === "proxy_tunnel") {
-          console.log(`[HLTV Scraper Lib] Proxy tunnel failed, retrying once without proxy...`);
+        if (shouldTryDirectFallback(errorClass, direct)) {
+          console.log(`[HLTV Scraper Lib] ${errorClass} through proxy, retrying once without proxy...`);
           executeScraper(mode, queryOrId, requestId, 1, true, options).then(resolve, reject);
           return;
         }
@@ -354,8 +360,8 @@ async function executeScraper(mode: HltvMode, queryOrId?: string, requestId = "h
              executeScraper(mode, queryOrId, requestId, attempt + 1, direct, options).then(resolve, reject);
              return;
           }
-          if (allowDirectFallback() && !direct && errorClass === "proxy_tunnel") {
-            console.log(`[HLTV Scraper Lib] Proxy tunnel failed, retrying once without proxy...`);
+          if (shouldTryDirectFallback(errorClass, direct)) {
+            console.log(`[HLTV Scraper Lib] ${errorClass} through proxy, retrying once without proxy...`);
             executeScraper(mode, queryOrId, requestId, 1, true, options).then(resolve, reject);
             return;
           }
@@ -422,7 +428,7 @@ function getMaxAttempts(mode: HltvMode) {
 
 function getTimeoutMs(mode: HltvMode) {
   if (mode === "health") return 30000;
-  if (mode === "search") return Number(process.env.HLTV_SEARCH_TIMEOUT_MS || 45000);
+  if (mode === "search") return Number(process.env.HLTV_SEARCH_TIMEOUT_MS || 30000);
   if (mode === "events" || mode === "scrape") return 90000;
   return 120000;
 }
@@ -443,7 +449,17 @@ function shouldRetry(mode: HltvMode, errorClass: string, attempt: number, maxAtt
 }
 
 function allowDirectFallback() {
-  return process.env.HLTV_ALLOW_DIRECT_FALLBACK === "1";
+  return process.env.HLTV_ALLOW_DIRECT_FALLBACK !== "0";
+}
+
+function shouldTryDirectFallback(errorClass: string, direct: boolean) {
+  if (direct || !allowDirectFallback()) return false;
+
+  const normalized = normalizeParserErrorClass(errorClass);
+  return normalized === "proxy_tunnel"
+    || normalized === "timeout"
+    || normalized === "network_error"
+    || normalized === "process_failed";
 }
 
 function forceKillChild(pid?: number) {

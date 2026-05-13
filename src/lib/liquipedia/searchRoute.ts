@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getSearchCacheTtlMs } from "@/lib/env";
-import { searchTournamentPages } from "@/lib/liquipedia/client";
+import { filterLiquipediaSearchResultsForQuery, searchTournamentPages } from "@/lib/liquipedia/client";
 import { classifyParserError, emptyValidIfNoItems } from "@/lib/parserErrors";
 import crypto from "crypto";
 
@@ -53,14 +53,15 @@ async function handleSearchRequest(config: {
       staleRequest = cachedRequest || await findCachedSearchRequest(discipline.id, query, staleSince);
 
       if (cachedRequest) {
-        const cachedResultsCount = cachedRequest.results.length;
+        const cachedResults = filterLiquipediaSearchResultsForQuery(query, cachedRequest.results);
+        const cachedResultsCount = cachedResults.length;
         await prisma.searchRequest.create({
           data: {
             disciplineId: discipline.id,
             queryText: query,
             status: "CACHED",
             results: {
-              create: cachedRequest.results.map((result) => ({
+              create: cachedResults.map((result) => ({
                 pageId: result.pageId,
                 title: result.title,
                 pageUrl: result.pageUrl,
@@ -72,28 +73,30 @@ async function handleSearchRequest(config: {
             }
           }
         });
-        await logSearchRouteRequest({
-          disciplineSlug: config.disciplineSlug,
-          query,
-          cacheHit: true,
-          cacheLayer: "db",
-          matchesCount: cachedResultsCount,
-          errorClass: emptyValidIfNoItems([cachedResultsCount]),
-        });
+        if (cachedResultsCount > 0) {
+          await logSearchRouteRequest({
+            disciplineSlug: config.disciplineSlug,
+            query,
+            cacheHit: true,
+            cacheLayer: "db",
+            matchesCount: cachedResultsCount,
+            errorClass: emptyValidIfNoItems([cachedResultsCount]),
+          });
 
-        return NextResponse.json({
-          query,
-          cacheHit: true,
-          results: cachedRequest.results.map((result) => ({
-            pageId: result.pageId,
-            title: result.title,
-            pageUrl: result.pageUrl,
-            snippet: result.snippet,
-            score: result.score,
-            wordCount: result.wordCount,
-            dates: result.dates
-          }))
-        });
+          return NextResponse.json({
+            query,
+            cacheHit: true,
+            results: cachedResults.map((result) => ({
+              pageId: result.pageId,
+              title: result.title,
+              pageUrl: result.pageUrl,
+              snippet: result.snippet,
+              score: result.score,
+              wordCount: result.wordCount,
+              dates: result.dates
+            }))
+          });
+        }
       }
     }
 
@@ -103,12 +106,17 @@ async function handleSearchRequest(config: {
       results = await searchTournamentPages(query, apiUrl, config.disciplineSlug);
     } catch (error) {
       if (staleRequest) {
+        const staleResults = filterLiquipediaSearchResultsForQuery(query, staleRequest.results);
+        if (staleResults.length === 0) {
+          throw error;
+        }
+
         await logSearchRouteRequest({
           disciplineSlug: config.disciplineSlug,
           query,
           cacheHit: true,
           cacheLayer: "db-stale",
-          matchesCount: staleRequest.results.length,
+          matchesCount: staleResults.length,
           errorClass: classifyParserError({ message: error instanceof Error ? error.message : String(error) }),
         });
         return NextResponse.json({
@@ -116,7 +124,7 @@ async function handleSearchRequest(config: {
           cacheHit: true,
           stale: true,
           warning: error instanceof Error ? error.message : "Search failed, returned stale cache",
-          results: staleRequest.results.map((result) => ({
+          results: staleResults.map((result) => ({
             pageId: result.pageId,
             title: result.title,
             pageUrl: result.pageUrl,

@@ -5,6 +5,8 @@ import { useState } from "react";
 import { detectTournamentSource, type TournamentSource } from "@/lib/tournamentSource";
 import { dispatchTournamentDataUpdated } from "@/lib/clientEvents";
 
+const IMPORT_CLIENT_TIMEOUT_MS = 180000;
+
 export default function LoadTournamentButton({
   pageId,
   title,
@@ -35,13 +37,18 @@ export default function LoadTournamentButton({
     setLoading(true);
     setError(null);
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), IMPORT_CLIENT_TIMEOUT_MS);
+
     try {
       const resolvedSource = source ?? detectTournamentSource(pageUrl);
       const response = await fetch(`/api/${disciplineSlug}/import-tournament`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pageId, title, pageUrl, force: true, source: resolvedSource })
+        body: JSON.stringify({ pageId, title, pageUrl, force: true, source: resolvedSource }),
+        signal: controller.signal
       });
+      clearTimeout(timeoutId);
 
       const data = (await response.json()) as { tournament?: { id: string }; error?: string };
 
@@ -53,9 +60,14 @@ export default function LoadTournamentButton({
       router.refresh();
       dispatchTournamentDataUpdated({ tournamentId: data.tournament.id, disciplineSlug });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Неизвестная ошибка");
+      if (err instanceof Error && err.name === "AbortError") {
+        setError("Импорт длится больше 3 минут. Обычно это медленный прокси или слишком много подстраниц Liquipedia. Попробуйте другой прокси и повторите.");
+      } else {
+        setError(err instanceof Error ? err.message : "Неизвестная ошибка");
+      }
     } finally {
       setLoading(false);
+      clearTimeout(timeoutId);
     }
   }
 

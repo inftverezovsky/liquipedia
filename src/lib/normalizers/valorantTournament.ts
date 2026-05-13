@@ -438,28 +438,57 @@ function firstClean(...values: Array<string | null | undefined>) {
 
 function extractSubPages(wikitext: string, html: string, pageUrl: string): string[] {
   const subPages: string[] = [];
+  const baseUrl = pageUrl.replace(/\/+$/, "");
+  const basePath = new URL(baseUrl).pathname.replace(/\/+$/, "");
+
+  const pushIfRelevant = (href: string | undefined | null) => {
+    if (!href || href.startsWith("#") || href.includes("action=edit")) return;
+
+    const fullUrl = href.startsWith("http") ? href : `https://liquipedia.net${href.startsWith("/") ? href : `/${href}`}`;
+    let parsed: URL;
+    try {
+      parsed = new URL(fullUrl);
+    } catch {
+      return;
+    }
+
+    const path = parsed.pathname.replace(/\/+$/, "");
+    if (!path.startsWith(`${basePath}/`)) return;
+
+    const suffix = decodeURIComponent(path.slice(basePath.length + 1)).replace(/ /g, "_");
+    if (!suffix || suffix.includes("/") || suffix.includes("Qualifier")) return;
+    if (!EVENT_SUBPAGE_ALLOWLIST.includes(suffix)) return;
+
+    subPages.push(`${parsed.origin}${path}`);
+  };
+
   if (html) {
     const $ = cheerio.load(html);
     $(".tabs-static a, .nav-tabs a").each((_, el) => {
-      const href = $(el).attr("href");
-      if (href && !href.startsWith("#") && !href.includes("action=edit")) {
-        const fullUrl = href.startsWith("http") ? href : `https://liquipedia.net${href}`;
-        if (fullUrl.startsWith(pageUrl) && fullUrl !== pageUrl) subPages.push(fullUrl);
-      }
+      pushIfRelevant($(el).attr("href"));
     });
   }
-  const urlParts = pageUrl.split("/valorant/");
-  const titlePart = urlParts.length > 1 ? decodeURIComponent(urlParts[1]).replace(/_/g, " ") : "";
+  const titlePart = decodeURIComponent(basePath.split("/").slice(2).join("/")).replace(/_/g, " ");
   const subLinkRegex = /\[\[([^|\]]+\/[^|\]]+)(?:\|[^\]]*)?\]\]/g;
   let match;
   while ((match = subLinkRegex.exec(wikitext))) {
     const subPath = match[1].replace(/_/g, " ");
     if (subPath.startsWith(titlePart) && subPath !== titlePart) {
-      subPages.push(`https://liquipedia.net/valorant/${subPath.replace(/ /g, "_")}`);
+      pushIfRelevant(`/valorant/${subPath.replace(/ /g, "_")}`);
     }
   }
   return Array.from(new Set(subPages));
 }
+
+const EVENT_SUBPAGE_ALLOWLIST = [
+  "Group_Stage",
+  "Swiss_Stage",
+  "Playoffs",
+  "Bracket",
+  "Main_Event",
+  "Regular_Season",
+  "Finals"
+];
 
 function inferTournamentStatus(startDate?: Date | null, endDate?: Date | null) {
   const now = Date.now();

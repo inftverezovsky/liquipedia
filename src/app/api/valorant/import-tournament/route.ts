@@ -7,6 +7,10 @@ import { importTournamentRecursive } from "@/lib/liquipedia/importer";
 import { dedupeTournamentMatches } from "@/lib/matches/dedupe";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 300;
+
+const IMPORT_ROUTE_TIMEOUT_MS = Number(process.env.LIQUIPEDIA_IMPORT_TIMEOUT_MS || 180000);
+const STALE_PENDING_IMPORT_MS = Number(process.env.STALE_PENDING_IMPORT_MS || 10 * 60 * 1000);
 
 type Body = {
   pageId?: unknown;
@@ -29,6 +33,20 @@ export async function POST(request: Request) {
 
   const discipline = await getOrCreateValorantDiscipline();
 
+  await prisma.tournamentImport.updateMany({
+    where: {
+      disciplineId: discipline.id,
+      pageTitle: title,
+      status: "PENDING",
+      startedAt: { lt: new Date(Date.now() - STALE_PENDING_IMPORT_MS) },
+    },
+    data: {
+      status: "FAILED",
+      finishedAt: new Date(),
+      errorMessage: "Импорт был автоматически закрыт как зависший. Повторите загрузку.",
+    },
+  });
+
   const tournamentImport = await prisma.tournamentImport.create({
     data: {
       disciplineId: discipline.id,
@@ -42,7 +60,7 @@ export async function POST(request: Request) {
   try {
     const apiUrl = discipline.baseApiUrl ?? "https://liquipedia.net/valorant/api.php";
     
-    const importResult = await importTournamentRecursive({
+    const importResult = await withImportTimeout(importTournamentRecursive({
       disciplineId: discipline.id,
       disciplineSlug: "valorant",
       apiUrl,
@@ -52,7 +70,7 @@ export async function POST(request: Request) {
       normalizer: normalizeValorantTournament,
       importRecordId: tournamentImport.id,
       force: body.force
-    });
+    }), title);
     const { tournament, normalized } = importResult;
 
     await prisma.tournamentImport.update({
@@ -96,4 +114,17 @@ export async function POST(request: Request) {
       { status: 500 }
     );
   }
+}
+
+function withImportTimeout<T>(promise: Promise<T>, title: string): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<T>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error(`Импорт ${title} занял больше ${Math.round(IMPORT_ROUTE_TIMEOUT_MS / 1000)} секунд. Проверьте прокси и повторите.`));
+    }, IMPORT_ROUTE_TIMEOUT_MS);
+  });
+
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timeoutId) clearTimeout(timeoutId);
+  });
 }

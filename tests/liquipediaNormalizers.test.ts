@@ -86,3 +86,28 @@ test("Counter-Strike and LoL normalizers ignore crosstable matrix rows as match 
   assert.equal(cs.matches.length, 0);
   assert.equal(lol.matches.length, 0);
 });
+
+test("Valorant normalizer only keeps stage subpages from the selected event", () => {
+  const normalized = normalizeValorantTournament({
+    title: "Source League/2026/Spring/Promotion",
+    pageUrl: "https://liquipedia.net/valorant/Source_League/2026/Spring/Promotion",
+    wikitext: `
+      {{Infobox league|name=Source League Promotion|sdate=2026-05-15|edate=2026-05-24}}
+      [[Source League/2026/Spring/Promotion/Group Stage]]
+      [[Source League/2026/Spring/Promotion/Open Qualifier]]
+      [[Source League/2026/Spring/Promotion/Europe]]
+      [[Source League/2026/Spring/Regular Season]]
+    `,
+    parsedHtml: `
+      <div class="tabs-static">
+        <a href="/valorant/Source_League/2026/Spring/Promotion/Playoffs">Playoffs</a>
+        <a href="/valorant/Source_League/2026/Spring/Promotion/Teams">Teams</a>
+      </div>
+    `,
+  });
+
+  assert.deepEqual(normalized.subPages, [
+    "https://liquipedia.net/valorant/Source_League/2026/Spring/Promotion/Playoffs",
+    "https://liquipedia.net/valorant/Source_League/2026/Spring/Promotion/Group_Stage",
+  ]);
+});

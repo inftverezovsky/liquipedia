@@ -35,10 +35,6 @@ export async function fetchDisciplinePortal(slug: string, force = false): Promis
     await resetProxyCooldowns();
     portalCache.delete(cacheKey);
     console.log(`[Portal Lib] Force refresh: cleared proxy cooldowns and portal cache for ${slug}`);
-  } else {
-    // If force, clear proxy cooldowns to give it a fresh start
-    const { resetProxyCooldowns } = await import("../proxySelector");
-    await resetProxyCooldowns();
   }
 
   // Absolute timeout of 45 seconds for the entire operation
@@ -61,8 +57,9 @@ async function internalFetchDisciplinePortal(slug: string, force = false): Promi
     urls.push(`https://liquipedia.net/leagueoflegends/Portal:Tournaments`);
   }
   
-  let html = "";
-  let attempts = 0;
+  try {
+    let html = "";
+    let attempts = 0;
   const maxAttempts = force ? 3 : 1;
 
   while (attempts < maxAttempts && !html) {
@@ -282,7 +279,7 @@ async function internalFetchDisciplinePortal(slug: string, force = false): Promi
       
       if (!t.startDate || !t.endDate) {
         // If we can't parse dates, only show if it was explicitly "upcoming" or "ongoing"
-        return t.status === 'upcoming' || t.status === 'ongoing';
+        return t.status === 'upcoming';
       }
 
       const diffDaysStart = (t.startDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);

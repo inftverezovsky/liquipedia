@@ -23,6 +23,7 @@ export default function HltvTournamentsWidget({ disciplineSlug }: { disciplineSl
   const [error, setError] = useState<string | null>(null);
   const [health, setHealth] = useState<{ status: 'online' | 'error' | 'loading', isCloudflare?: boolean }>({ status: 'loading' });
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [hasLoaded, setHasLoaded] = useState(false);
 
   const fetchHltvTournaments = useCallback(async (force = false) => {
     setLoading(true);
@@ -41,6 +42,7 @@ export default function HltvTournamentsWidget({ disciplineSlug }: { disciplineSl
       setHealth({ status: 'error', isCloudflare: err.message.includes("403") || err.message.includes("Cloudflare") });
     } finally {
       setLoading(false);
+      setHasLoaded(true);
     }
   }, [disciplineSlug]);
 
@@ -110,7 +112,7 @@ export default function HltvTournamentsWidget({ disciplineSlug }: { disciplineSl
                <TournamentSkeleton key={i} />
              ))}
           </div>
-        ) : tournaments.length === 0 && !loading ? (
+        ) : !hasLoaded && !loading ? (
           <div className="flex-1 flex flex-col items-center justify-center p-12 text-center">
              <div className="h-16 w-16 rounded-full bg-slate-50 flex items-center justify-center mb-6 border border-slate-100">
                 <Trophy className="w-8 h-8 text-slate-300" />
@@ -121,6 +123,11 @@ export default function HltvTournamentsWidget({ disciplineSlug }: { disciplineSl
              >
                Нажмите, чтобы загрузить список
              </button>
+          </div>
+        ) : tournaments.length === 0 && !loading ? (
+          <div className="flex-1 flex flex-col items-center justify-center p-12 text-center">
+             <div className="text-sm font-black text-slate-400 uppercase tracking-widest">Турниры не найдены</div>
+             <p className="text-[10px] font-bold text-slate-400 mt-2 uppercase">HLTV не вернул активных событий</p>
           </div>
         ) : error ? (
           <div className="p-8 text-center text-sm font-bold text-rose-500">{error}</div>

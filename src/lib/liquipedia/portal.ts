@@ -77,7 +77,9 @@ async function internalFetchDisciplinePortal(slug: string, force = false): Promi
 
     const sections = [
       { header: "Ongoing", status: "ongoing" as const },
-      { header: "Upcoming", status: "upcoming" as const }
+      { header: "Upcoming", status: "upcoming" as const },
+      { header: "Current", status: "ongoing" as const },
+      { header: "Future", status: "upcoming" as const }
     ];
 
     for (const section of sections) {
@@ -154,7 +156,7 @@ async function internalFetchDisciplinePortal(slug: string, force = false): Promi
             title,
             url: href.startsWith("http") ? href : `https://liquipedia.net${href}`,
             dates,
-            status: "ongoing",
+            status: "upcoming", // Default to upcoming in fallback, will be re-calculated
             tier: tier || undefined
           });
         }
@@ -208,7 +210,24 @@ async function internalFetchDisciplinePortal(slug: string, force = false): Promi
           }
         }
       } catch (e) {}
-      return { ...t, startDate, endDate };
+
+      // Re-calculate status based on parsed dates for better accuracy
+      let status = t.status;
+      if (startDate && endDate) {
+        const startMs = startDate.getTime();
+        const endMs = endDate.getTime();
+        const nowMs = now.getTime();
+
+        if (nowMs >= startMs - 1000 * 60 * 60 * 24 && nowMs <= endMs + 1000 * 60 * 60 * 24) {
+          status = "ongoing";
+        } else if (nowMs < startMs) {
+          status = "upcoming";
+        } else if (nowMs > endMs) {
+          status = "completed";
+        }
+      }
+
+      return { ...t, status, startDate, endDate };
     });
 
     const filtered = enriched.filter(t => {

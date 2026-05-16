@@ -8,6 +8,7 @@ export type PortalTournament = {
   url: string;
   dates: string;
   status: "ongoing" | "upcoming" | "completed";
+  tier?: string;
 };
 
 export type DisciplinePortalData = {
@@ -118,11 +119,16 @@ async function internalFetchDisciplinePortal(slug: string, force = false): Promi
         }
 
         if (title && href && !href.includes("Special:") && !href.includes("action=edit") && title.length > 2) {
+          const tierText = $el.find(".tournament-badge__text").first().text().trim();
+          const tierChip = $el.find(".tournament-badge__chip").first().text().trim();
+          const tier = tierChip ? `Tier ${tierChip}` : tierText;
+
           tournaments.push({
             title,
             url: href.startsWith("http") ? href : `https://liquipedia.net${href}`,
             dates,
-            status: section.status
+            status: section.status,
+            tier: tier || undefined
           });
         }
       });
@@ -139,11 +145,17 @@ async function internalFetchDisciplinePortal(slug: string, force = false): Promi
         
         if (title && href && !href.includes("Special:") && title.length > 2) {
           if (slug === 'leagueoflegends' && !href.includes('/leagueoflegends/')) return;
+          
+          const tierText = $el.find(".tournament-badge__text").first().text().trim();
+          const tierChip = $el.find(".tournament-badge__chip").first().text().trim();
+          const tier = tierChip ? `Tier ${tierChip}` : tierText;
+
           tournaments.push({
             title,
             url: href.startsWith("http") ? href : `https://liquipedia.net${href}`,
             dates,
-            status: "ongoing"
+            status: "ongoing",
+            tier: tier || undefined
           });
         }
       });

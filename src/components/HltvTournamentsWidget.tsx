@@ -2,7 +2,8 @@
 
 import { useCallback, useState, useEffect } from "react";
 import Link from "next/link";
-import { Trophy, ArrowRight, ExternalLink, Loader2, Link as LinkIcon, Plus, Check } from "lucide-react";
+import { Trophy, ArrowRight, ExternalLink, Loader2, Link as LinkIcon, Plus, Check, Star } from "lucide-react";
+import { TournamentSkeleton } from "@/components/ui/Skeleton";
 
 
 type HltvTournament = {
@@ -13,6 +14,7 @@ type HltvTournament = {
   isLinked?: boolean;
   dbId?: string | null;
   dates?: string;
+  stars?: number;
 };
 
 export default function HltvTournamentsWidget({ disciplineSlug }: { disciplineSlug: string }) {
@@ -103,9 +105,10 @@ export default function HltvTournamentsWidget({ disciplineSlug }: { disciplineSl
 
       <div className="p-0 overflow-y-auto max-h-[500px] custom-scrollbar min-h-[120px] flex flex-col">
         {loading && tournaments.length === 0 ? (
-          <div className="flex-1 flex flex-col items-center justify-center p-12 text-center">
-             <div className="h-8 w-8 rounded-full border-2 border-indigo-600 border-t-transparent animate-spin mb-4" />
-             <div className="text-sm font-black text-slate-950 uppercase tracking-widest">Сканирование HLTV...</div>
+          <div className="p-4 space-y-3">
+             {[...Array(5)].map((_, i) => (
+               <TournamentSkeleton key={i} />
+             ))}
           </div>
         ) : tournaments.length === 0 && !loading ? (
           <div className="flex-1 flex flex-col items-center justify-center p-12 text-center">
@@ -136,6 +139,16 @@ export default function HltvTournamentsWidget({ disciplineSlug }: { disciplineSl
                          <span className="flex items-center gap-1 text-[8px] font-black text-indigo-500 uppercase bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100">
                            <Check className="w-2.5 h-2.5" /> В базе данных
                          </span>
+                       )}
+                       {t.stars !== undefined && t.stars > 0 && (
+                         <div className="flex items-center gap-0.5 ml-1">
+                           {[...Array(5)].map((_, i) => (
+                             <Star 
+                               key={i} 
+                               className={`w-2.5 h-2.5 ${i < t.stars! ? "text-amber-400 fill-amber-400" : "text-slate-200"}`} 
+                             />
+                           ))}
+                         </div>
                        )}
                     </div>
                     <h3 className="text-sm font-black text-slate-950 leading-tight group-hover:text-indigo-600 transition-colors truncate mb-1">

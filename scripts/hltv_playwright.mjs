@@ -365,12 +365,14 @@ async function scrapeHltv() {
             const title = el.querySelector('.event-name-container')?.textContent?.trim() || a.textContent.trim();
             const href = a.getAttribute('href');
             const dates = el.querySelector('.event-date-container')?.textContent?.trim() || "";
+            const stars = el.querySelectorAll('.stars i.fa-star').length;
             results.push({
               title,
               id: href.split('/')[2],
               url: 'https://www.hltv.org' + href,
               status: 'ongoing',
-              dates
+              dates,
+              stars: stars || 0
             });
           }
         });
@@ -381,6 +383,7 @@ async function scrapeHltv() {
              const title = el.querySelector('.event-name-container')?.textContent?.trim() || a.textContent.trim();
              const href = a.getAttribute('href');
              const dates = el.querySelector('.event-date-container')?.textContent?.trim() || "";
+             const stars = el.querySelectorAll('.stars i.fa-star').length;
              
              const startDate = parseDate(dates);
              // Filter: only if starts within 7 days
@@ -390,7 +393,8 @@ async function scrapeHltv() {
                  id: href.split('/')[2],
                  url: 'https://www.hltv.org' + href,
                  status: 'upcoming',
-                 dates
+                 dates,
+                 stars: stars || 0
                });
              }
           }

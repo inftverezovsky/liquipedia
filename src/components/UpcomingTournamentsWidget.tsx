@@ -2,12 +2,14 @@
 
 import { useState, useCallback, useEffect } from "react";
 import LoadTournamentButton from "@/components/LoadTournamentButton";
+import { TournamentSkeleton } from "@/components/ui/Skeleton";
 
 type PortalTournament = {
   title: string;
   url: string;
   dates: string;
   status: "ongoing" | "upcoming" | "completed";
+  tier?: string;
   dbStatus?: 'not_loaded' | 'announcements' | 'ready' | 'synced';
   dbId?: string;
 };
@@ -74,9 +76,10 @@ export default function UpcomingTournamentsWidget({ disciplineSlug }: { discipli
 
       <div className="p-0 overflow-y-auto max-h-[700px] custom-scrollbar min-h-[120px] flex flex-col">
         {loading && !data ? (
-          <div className="flex-1 flex flex-col items-center justify-center p-12 text-center">
-             <div className="h-8 w-8 rounded-full border-2 border-indigo-600 border-t-transparent animate-spin mb-4" />
-             <div className="text-sm font-black text-slate-950 uppercase tracking-widest">Загрузка данных...</div>
+          <div className="p-4 space-y-3">
+             {[...Array(5)].map((_, i) => (
+               <TournamentSkeleton key={i} />
+             ))}
           </div>
         ) : !data && !loading ? (
           <div className="flex-1 flex flex-col items-center justify-center p-12 text-center">
@@ -149,6 +152,11 @@ function TournamentRow({ t, disciplineSlug }: { t: PortalTournament, disciplineS
             <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 truncate">
               {t.status === "ongoing" ? "Ongoing" : "Upcoming"}
             </span>
+            {t.tier && (
+              <span className="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-600 text-[8px] font-black uppercase tracking-wider border border-indigo-100/50">
+                {t.tier}
+              </span>
+            )}
           </div>
           <h3 className="text-sm font-black text-slate-950 leading-tight group-hover:text-indigo-600 transition-colors truncate" title={t.title}>
             {t.title}

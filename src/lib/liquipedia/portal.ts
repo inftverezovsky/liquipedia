@@ -85,7 +85,8 @@ async function internalFetchDisciplinePortal(slug: string, force = false): Promi
     for (const section of sections) {
       const $header = $(`h2, h3, b, .t-h-header, .tournament-tabs > div, span`).filter((_, el) => {
         const t = $(el).text().trim().toLowerCase();
-        return t === section.header.toLowerCase();
+        const headerLower = section.header.toLowerCase();
+        return t === headerLower || t.includes(headerLower + " tournaments") || (t.includes(headerLower) && t.length < 20);
       }).first();
 
       if ($header.length === 0) continue;

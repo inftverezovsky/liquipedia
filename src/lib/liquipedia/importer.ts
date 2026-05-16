@@ -85,10 +85,13 @@ export async function importTournamentRecursive(params: {
   const allMatchIds = [...(mainResult.processedMatchIds || [])];
   let finalProcessedMatchIds = allMatchIds;
 
-  // 2. Process Sub-pages (one level deep)
+  // 2. Process Sub-pages (sequentially for stability)
   if (mainResult.normalized.subPages && mainResult.normalized.subPages.length > 0) {
-    const subResults = await Promise.all(mainResult.normalized.subPages.map(async (subUrl: string) => {
+    console.log(`[Importer] Found ${mainResult.normalized.subPages.length} sub-pages for ${title}`);
+    for (let i = 0; i < mainResult.normalized.subPages.length; i++) {
+      const subUrl = mainResult.normalized.subPages[i];
       try {
+        console.log(`[Importer] Processing sub-page ${i + 1}/${mainResult.normalized.subPages.length}: ${subUrl}`);
         const subTitle = titleFromLiquipediaUrl(subUrl, disciplineSlug);
         const res = await processSinglePage({
           disciplineId,
@@ -100,18 +103,14 @@ export async function importTournamentRecursive(params: {
           importRecordId,
           force,
           tournamentId: mainResult.tournament.id,
-          clearMatches: false // Don't clear on subpages!
+          clearMatches: false // DON'T wipe matches on sub-pages!
         });
-        return res;
+        
+        if (res.matches) allMatches.push(...res.matches);
+        if (res.processedMatchIds) finalProcessedMatchIds.push(...res.processedMatchIds);
       } catch (err) {
         console.error(`[Importer] Failed to process sub-page ${subUrl}:`, err);
-        return null;
       }
-    }));
-
-    for (const res of subResults) {
-      if (res?.matches) allMatches.push(...res.matches);
-      if (res?.processedMatchIds) allMatchIds.push(...res.processedMatchIds);
     }
   }
 

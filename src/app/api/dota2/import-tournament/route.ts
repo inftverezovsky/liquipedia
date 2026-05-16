@@ -43,17 +43,24 @@ export async function POST(request: Request) {
   try {
     const apiUrl = discipline.baseApiUrl ?? "https://liquipedia.net/dota2/api.php";
     
-    const importResult = await importTournamentRecursive({
-      disciplineId: discipline.id,
-      disciplineSlug: "dota2",
-      apiUrl,
-      pageId,
-      title,
-      pageUrl,
-      normalizer: normalizeDota2Tournament,
-      importRecordId: tournamentImport.id,
-      force: body.force
-    });
+    // Absolute timeout of 60 seconds for the import operation
+    const importResult = await Promise.race([
+      importTournamentRecursive({
+        disciplineId: discipline.id,
+        disciplineSlug: "dota2",
+        apiUrl,
+        pageId,
+        title,
+        pageUrl,
+        normalizer: normalizeDota2Tournament,
+        importRecordId: tournamentImport.id,
+        force: body.force
+      }),
+      new Promise<never>((_, reject) => 
+        setTimeout(() => reject(new Error("Превышено время ожидания импорта (60с). Попробуйте еще раз, данные могут подгрузиться в фоне.")), 60000)
+      )
+    ]);
+    
     const { tournament, normalized } = importResult;
 
     await prisma.tournamentImport.update({

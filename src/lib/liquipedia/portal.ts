@@ -182,27 +182,30 @@ async function internalFetchDisciplinePortal(slug: string, force = false): Promi
         }
       });
 
-      // New: support for panel-box style tournaments (common in Dota 2)
+      // Aggressive: look for any panel-box (common for featured tournaments in Dota 2)
       $(".panel-box").each((_, box) => {
         const $box = $(box);
-        const heading = $box.find(".panel-box-heading").text().toLowerCase();
-        if (heading.includes("tournament") || heading.includes("ongoing") || heading.includes("upcoming")) {
-          $box.find("a").each((_, a) => {
-            const $a = $(a);
-            const title = $a.attr("title") || $a.text().trim();
-            const href = $a.attr("href") || "";
-            if (title && href && !href.includes("Special:") && title.length > 2) {
-               // Try to find dates in parent or nearby
-               const dates = $a.closest("div").text().match(/[A-Z][a-z]+ \d+(?: \d+)?/g)?.join(" - ") || "";
-               tournaments.push({
-                 title,
-                 url: href.startsWith("http") ? href : `https://liquipedia.net${href}`,
-                 dates,
-                 status: heading.includes("ongoing") ? "ongoing" : "upcoming",
-               });
+        $box.find("a").each((_, a) => {
+          const $a = $(a);
+          const title = $a.attr("title") || $a.text().trim();
+          const href = $a.attr("href") || "";
+          
+          // Skip small icons, special pages, and clearly non-tournament links
+          if (title && href && !href.includes("Special:") && !href.includes("action=edit") && title.length > 5) {
+            // Check if it's likely a tournament link
+            const isTournamentUrl = href.includes("/dota2/") && !href.includes("/Main_Page") && !href.includes("/Portal:");
+            if (isTournamentUrl) {
+              // Try to find dates in the same box
+              const dates = $box.text().match(/[A-Z][a-z]+ \d+(?: \d+)?/g)?.join(" - ") || "";
+              tournaments.push({
+                title,
+                url: href.startsWith("http") ? href : `https://liquipedia.net${href}`,
+                dates,
+                status: "ongoing", // Assume featured/panel-box tournaments are ongoing
+              });
             }
-          });
-        }
+          }
+        });
       });
     }
 

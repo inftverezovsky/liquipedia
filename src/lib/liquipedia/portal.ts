@@ -161,29 +161,36 @@ async function internalFetchDisciplinePortal(slug: string, force = false): Promi
       let endDate: Date | null = null;
       try {
         const dateLower = t.dates.toLowerCase();
-        let month = -1;
-        
+        const foundMonths: { month: number, index: number }[] = [];
         for (const [m, i] of Object.entries(months)) {
-          if (dateLower.includes(m)) {
-            month = i;
-            break;
+          let idx = dateLower.indexOf(m);
+          while (idx !== -1) {
+            foundMonths.push({ month: i, index: idx });
+            idx = dateLower.indexOf(m, idx + 1);
           }
         }
+        foundMonths.sort((a, b) => a.index - b.index);
 
         const days = dateLower.match(/\d+/g);
-        if (month !== -1 && days && days.length > 0) {
+        if (foundMonths.length > 0 && days && days.length > 0) {
+          const startMonth = foundMonths[0].month;
           const startDay = parseInt(days[0]);
-          startDate = new Date(now.getFullYear(), month, startDay);
+          startDate = new Date(now.getFullYear(), startMonth, startDay);
           
           if (startDate.getTime() < now.getTime() - 1000 * 60 * 60 * 24 * 30) {
-             if (month < now.getMonth()) {
+             if (startMonth < now.getMonth()) {
                startDate.setFullYear(now.getFullYear() + 1);
              }
           }
 
           if (days.length > 1) {
+            const endMonth = foundMonths.length > 1 ? foundMonths[foundMonths.length - 1].month : startMonth;
             const endDay = parseInt(days[days.length - 1]);
-            endDate = new Date(startDate.getFullYear(), month, endDay);
+            endDate = new Date(startDate.getFullYear(), endMonth, endDay);
+            
+            if (endDate.getTime() < startDate.getTime()) {
+               endDate.setFullYear(endDate.getFullYear() + 1);
+            }
           } else {
             endDate = new Date(startDate.getTime());
           }

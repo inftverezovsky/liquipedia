@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useState, useEffect } from "react";
 import Link from "next/link";
 import { Trophy, ArrowRight, ExternalLink, Loader2, Link as LinkIcon, Plus, Check } from "lucide-react";
 
@@ -41,6 +41,10 @@ export default function HltvTournamentsWidget({ disciplineSlug }: { disciplineSl
       setLoading(false);
     }
   }, [disciplineSlug]);
+
+  useEffect(() => {
+    fetchHltvTournaments(false);
+  }, [fetchHltvTournaments]);
 
   const handleCreateTournament = async (t: HltvTournament) => {
     if (actionLoading) return;

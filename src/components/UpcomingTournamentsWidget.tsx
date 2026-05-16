@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import LoadTournamentButton from "@/components/LoadTournamentButton";
 
 type PortalTournament = {
@@ -46,12 +46,9 @@ export default function UpcomingTournamentsWidget({ disciplineSlug }: { discipli
     }
   }, [disciplineSlug]);
 
-  // Removed automatic load on mount
-  /*
   useEffect(() => {
-    fetchTournaments();
+    fetchTournaments(false);
   }, [fetchTournaments]);
-  */
 
   const [showUpcoming, setShowUpcoming] = useState(false);
 

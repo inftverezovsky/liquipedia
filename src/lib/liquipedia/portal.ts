@@ -31,7 +31,7 @@ export async function fetchDisciplinePortal(slug: string, force = false): Promis
     }
   }
 
-  // Absolute timeout of 15 seconds for the entire operation
+  // Absolute timeout of 45 seconds for the entire operation
   return Promise.race([
     internalFetchDisciplinePortal(slug, force),
     new Promise<DisciplinePortalData>((resolve) => 
@@ -39,7 +39,7 @@ export async function fetchDisciplinePortal(slug: string, force = false): Promis
         console.warn(`[Portal Lib] TIMEOUT reached for ${slug}, returning cached/empty`);
         const cached = portalCache.get(cacheKey);
         resolve(cached?.data || { slug, name: slug, tournaments: [] });
-      }, 15000)
+      }, 45000)
     )
   ]);
 }

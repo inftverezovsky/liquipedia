@@ -10,7 +10,7 @@ import fs from "fs";
 import nodeFetch from "node-fetch";
 import path from "path";
 
-const LIQUIPEDIA_API_TIMEOUT_MS = Number(process.env.LIQUIPEDIA_API_TIMEOUT_MS || 20000);
+const LIQUIPEDIA_API_TIMEOUT_MS = Number(process.env.LIQUIPEDIA_API_TIMEOUT_MS || 40000);
 const LIQUIPEDIA_API_MAX_RETRIES = Number(process.env.LIQUIPEDIA_API_MAX_RETRIES || 1);
 const LIQUIPEDIA_SEARCH_CANDIDATE_LIMIT = Number(process.env.LIQUIPEDIA_SEARCH_CANDIDATE_LIMIT || 20);
 const LIQUIPEDIA_SEARCH_VARIATION_LIMIT = Number(process.env.LIQUIPEDIA_SEARCH_VARIATION_LIMIT || 5);

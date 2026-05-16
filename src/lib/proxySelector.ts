@@ -160,6 +160,14 @@ async function nextAverageLatency(proxyId: string, durationMs: number) {
   return Math.round((proxy.avgLatencyMs * Math.min(sampleCount, 20) + durationMs) / (Math.min(sampleCount, 20) + 1));
 }
 
+export async function resetProxyCooldowns() {
+  await prisma.proxyPool.updateMany({
+    where: { isActive: true },
+    data: { cooldownUntil: null }
+  }).catch(() => {});
+  proxyCache = null;
+}
+
 function proxyScore(proxy: CachedProxy) {
   const lastUsedMs = proxy.lastUsed ? proxy.lastUsed.getTime() : 0;
   const recencyPenalty = lastUsedMs ? Math.max(0, 120000 - (Date.now() - lastUsedMs)) / 120000 : 0;

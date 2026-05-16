@@ -29,6 +29,16 @@ export async function fetchDisciplinePortal(slug: string, force = false): Promis
       console.log(`[Portal Lib] Returning in-memory cache for ${slug}`);
       return cached.data;
     }
+  } else {
+    // If force, clear proxy cooldowns AND clear this portal's cache
+    const { resetProxyCooldowns } = await import("../proxySelector");
+    await resetProxyCooldowns();
+    portalCache.delete(cacheKey);
+    console.log(`[Portal Lib] Force refresh: cleared proxy cooldowns and portal cache for ${slug}`);
+  } else {
+    // If force, clear proxy cooldowns to give it a fresh start
+    const { resetProxyCooldowns } = await import("../proxySelector");
+    await resetProxyCooldowns();
   }
 
   // Absolute timeout of 45 seconds for the entire operation
@@ -52,25 +62,37 @@ async function internalFetchDisciplinePortal(slug: string, force = false): Promi
   }
   
   let html = "";
-  try {
-    for (const url of urls) {
-      try {
-        console.log(`[Portal Lib] Fetching ${url} via Proxy`);
-        const content = await fetchHtml(url);
-        if (content.length > 5000) {
-          html = content;
-          break;
-        }
-      } catch (e) {
-        console.error(`[Portal Lib] Failed to fetch ${url}:`, e);
-      }
-    }
+  let attempts = 0;
+  const maxAttempts = force ? 3 : 1;
 
-    if (!html) {
-      const cached = getPortalCache().get(cacheKey);
-      if (cached) return cached.data;
-      return { slug, name: slug, tournaments: [] };
+  while (attempts < maxAttempts && !html) {
+    attempts++;
+    try {
+      for (const url of urls) {
+        try {
+          console.log(`[Portal Lib] Fetching ${url} via Proxy (Attempt ${attempts}/${maxAttempts})`);
+          const content = await fetchHtml(url);
+          if (content.length > 5000) {
+            html = content;
+            break;
+          }
+        } catch (e) {
+          console.error(`[Portal Lib] Failed to fetch ${url}:`, e);
+        }
+      }
+    } catch (e) {}
+
+    if (!html && attempts < maxAttempts) {
+      console.log(`[Portal Lib] No content received, waiting 2s before retry...`);
+      await new Promise(r => setTimeout(r, 2000));
     }
+  }
+
+  if (!html) {
+    const cached = getPortalCache().get(cacheKey);
+    if (cached) return cached.data;
+    return { slug, name: slug, tournaments: [] };
+  }
     
     const $ = cheerio.load(html);
     const tournaments: PortalTournament[] = [];
@@ -257,21 +279,26 @@ async function internalFetchDisciplinePortal(slug: string, force = false): Promi
 
     const filtered = enriched.filter(t => {
       if (t.status === 'ongoing') return true;
-      if (t.status === 'completed') return false; // Never show completed
       
       if (!t.startDate || !t.endDate) {
-        // If we can't parse dates, only show if it was explicitly "upcoming"
-        return t.status === 'upcoming';
+        // If we can't parse dates, only show if it was explicitly "upcoming" or "ongoing"
+        return t.status === 'upcoming' || t.status === 'ongoing';
       }
 
-      // If it ended yesterday or earlier, hide it
-      if (t.endDate.getTime() < now.getTime() - 1000 * 60 * 60 * 24) return false;
-      
-      if (t.status === 'upcoming') {
-        const diffDays = (t.startDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
-        // User requested: "only those that will be in 7 days no later"
-        return diffDays >= -1 && diffDays <= 7;
+      const diffDaysStart = (t.startDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
+      const diffDaysEnd = (now.getTime() - t.endDate.getTime()) / (1000 * 60 * 60 * 24);
+
+      // 1. Show if it started within the last 5 days (even if marked completed)
+      if (diffDaysStart >= -5 && diffDaysStart <= 0) return true;
+
+      // 2. Show if it's upcoming in the next 14 days
+      if (t.status === 'upcoming' || diffDaysStart > 0) {
+        return diffDaysStart <= 14;
       }
+
+      // 3. Hide if it ended more than 1 day ago
+      if (diffDaysEnd > 1) return false;
+
       return true;
     });
 

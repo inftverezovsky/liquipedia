@@ -157,8 +157,31 @@ async function internalFetchDisciplinePortal(slug: string, force = false): Promi
             title,
             url: href.startsWith("http") ? href : `https://liquipedia.net${href}`,
             dates,
-            status: "upcoming", // Default to upcoming in fallback, will be re-calculated
+            status: "upcoming", 
             tier: tier || undefined
+          });
+        }
+      });
+
+      // New: support for panel-box style tournaments (common in Dota 2)
+      $(".panel-box").each((_, box) => {
+        const $box = $(box);
+        const heading = $box.find(".panel-box-heading").text().toLowerCase();
+        if (heading.includes("tournament") || heading.includes("ongoing") || heading.includes("upcoming")) {
+          $box.find("a").each((_, a) => {
+            const $a = $(a);
+            const title = $a.attr("title") || $a.text().trim();
+            const href = $a.attr("href") || "";
+            if (title && href && !href.includes("Special:") && title.length > 2) {
+               // Try to find dates in parent or nearby
+               const dates = $a.closest("div").text().match(/[A-Z][a-z]+ \d+(?: \d+)?/g)?.join(" - ") || "";
+               tournaments.push({
+                 title,
+                 url: href.startsWith("http") ? href : `https://liquipedia.net${href}`,
+                 dates,
+                 status: heading.includes("ongoing") ? "ongoing" : "upcoming",
+               });
+            }
           });
         }
       });
@@ -216,10 +239,11 @@ async function internalFetchDisciplinePortal(slug: string, force = false): Promi
       let status = t.status;
       if (startDate && endDate) {
         const startMs = startDate.getTime();
-        const endMs = endDate.getTime();
+        const endMs = endDate.getTime() + 1000 * 60 * 60 * 24; // End of the day
         const nowMs = now.getTime();
 
-        if (nowMs >= startMs - 1000 * 60 * 60 * 24 && nowMs <= endMs + 1000 * 60 * 60 * 24) {
+        // If starts today or yesterday, or is currently running
+        if (nowMs >= startMs - 1000 * 60 * 60 * 12 && nowMs <= endMs) {
           status = "ongoing";
         } else if (nowMs < startMs) {
           status = "upcoming";

@@ -80,12 +80,12 @@ export function classifyParserError(input: ParserErrorInput): ParserErrorClass {
     return "timeout";
   }
 
-  if (/selector|waiting for .*elements|locator|element.*not found|Timeout waiting/i.test(message)) {
-    return "selector_changed";
-  }
-
   if (/\b(timeout|timed out|deadline exceeded|aborted)\b/i.test(message)) {
     return "timeout";
+  }
+
+  if (/selector|waiting for .*elements|locator|element.*not found|Timeout waiting/i.test(message)) {
+    return "selector_changed";
   }
 
   if (/non-json|invalid json|unexpected token|JSON\.parse|parse error|failed to parse|syntaxerror/i.test(message)) {

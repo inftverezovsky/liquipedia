@@ -24,12 +24,22 @@ export default function HltvTournamentsWidget({ disciplineSlug }: { disciplineSl
   const [health, setHealth] = useState<{ status: 'online' | 'error' | 'loading', isCloudflare?: boolean }>({ status: 'loading' });
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [hasLoaded, setHasLoaded] = useState(false);
+  const [showUpcoming, setShowUpcoming] = useState(false);
+
+  const ongoing = tournaments.filter(t => t.status === "ongoing") || [];
+  const upcoming = tournaments.filter(t => t.status === "upcoming") || [];
 
   const fetchHltvTournaments = useCallback(async (force = false) => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/${disciplineSlug}/hltv/events${force ? "?force=true" : ""}`);
+      const timestamp = Date.now();
+      const queryParams = new URLSearchParams();
+      queryParams.set("t", String(timestamp));
+      if (force) {
+        queryParams.set("force", "true");
+      }
+      const res = await fetch(`/api/${disciplineSlug}/hltv/events?${queryParams.toString()}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to fetch");
       
@@ -97,7 +107,7 @@ export default function HltvTournamentsWidget({ disciplineSlug }: { disciplineSl
           </div>
         </div>
         <button 
-          onClick={() => fetchHltvTournaments(tournaments.length > 0)}
+          onClick={() => fetchHltvTournaments(true)}
           disabled={loading}
           className="p-2 rounded-xl bg-slate-50 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-all disabled:opacity-50"
         >
@@ -124,90 +134,47 @@ export default function HltvTournamentsWidget({ disciplineSlug }: { disciplineSl
                Нажмите, чтобы загрузить список
              </button>
           </div>
+        ) : error ? (
+          <div className="p-8 text-center text-sm font-bold text-rose-500">{error}</div>
         ) : tournaments.length === 0 && !loading ? (
           <div className="flex-1 flex flex-col items-center justify-center p-12 text-center">
              <div className="text-sm font-black text-slate-400 uppercase tracking-widest">Турниры не найдены</div>
              <p className="text-[10px] font-bold text-slate-400 mt-2 uppercase">HLTV не вернул активных событий</p>
           </div>
-        ) : error ? (
-          <div className="p-8 text-center text-sm font-bold text-rose-500">{error}</div>
         ) : (
           <ul className="divide-y divide-slate-100">
-            {tournaments.map((t, i) => (
-              <li key={`${t.title}-${i}`} className="p-5 hover:bg-slate-50 transition-colors group relative">
-                <div className="flex justify-between items-center gap-4">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 mb-1.5">
-                       <span className={`h-1.5 w-1.5 rounded-full ${t.status === 'ongoing' ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-slate-300'}`} />
-                       <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">
-                         {t.status === 'ongoing' ? 'Ongoing' : 'Upcoming'}
-                       </span>
-                       {t.isLinked && (
-                         <span className="flex items-center gap-1 text-[8px] font-black text-indigo-500 uppercase bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100">
-                           <Check className="w-2.5 h-2.5" /> В базе данных
-                         </span>
-                       )}
-                       {t.stars !== undefined && t.stars > 0 && (
-                         <div className="flex items-center gap-0.5 ml-1">
-                           {[...Array(5)].map((_, i) => (
-                             <Star 
-                               key={i} 
-                               className={`w-2.5 h-2.5 ${i < t.stars! ? "text-amber-400 fill-amber-400" : "text-slate-200"}`} 
-                             />
-                           ))}
-                         </div>
-                       )}
-                    </div>
-                    <h3 className="text-sm font-black text-slate-950 leading-tight group-hover:text-indigo-600 transition-colors truncate mb-1">
-                      {t.title}
-                    </h3>
-                    {t.dates && (
-                      <div className="text-[10px] font-bold text-slate-400 mb-2 uppercase tracking-wide">
-                        {t.dates}
-                      </div>
-                    )}
-                    <div className="flex items-center gap-3">
-                       <a 
-                         href={t.url} 
-                         target="_blank" 
-                         rel="noopener noreferrer"
-                         className="text-[9px] font-bold text-slate-400 hover:text-indigo-500 flex items-center gap-1 transition-colors"
-                       >
-                         <ExternalLink className="w-3 h-3" /> HLTV
-                       </a>
-                       {t.dbId && (
-                         <Link 
-                           href={`/counterstrike/tournament/${t.dbId}`}
-                           className="text-[9px] font-bold text-slate-400 hover:text-indigo-500 flex items-center gap-1 transition-colors"
-                         >
-                           <LinkIcon className="w-3 h-3" /> Открыть в админке
-                         </Link>
-                       )}
-                    </div>
-                  </div>
+            {ongoing.map((t, i) => (
+              <TournamentRow
+                key={`ongoing-${i}`}
+                t={t}
+                actionLoading={actionLoading}
+                handleCreateTournament={handleCreateTournament}
+                disciplineSlug={disciplineSlug}
+              />
+            ))}
 
-                  {!t.isLinked ? (
-                    <button
-                      onClick={() => handleCreateTournament(t)}
-                      disabled={!!actionLoading}
-                      className="shrink-0 p-2.5 rounded-xl bg-emerald-50 text-emerald-600 hover:bg-emerald-600 hover:text-white transition-all shadow-sm border border-emerald-100 flex items-center gap-2 group/btn"
-                    >
-                      {actionLoading === t.title ? (
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                      ) : (
-                        <>
-                          <Plus className="w-4 h-4" />
-                          <span className="text-[10px] font-black uppercase tracking-widest hidden group-hover/btn:inline">Создать</span>
-                        </>
-                      )}
-                    </button>
-                  ) : (
-                    <div className="shrink-0 p-2.5 rounded-xl bg-slate-50 text-slate-300 border border-slate-100">
-                       <Check className="w-4 h-4" />
-                    </div>
-                  )}
-                </div>
-              </li>
+            {upcoming.length > 0 && (
+              <div className="p-4 bg-slate-50/50">
+                <button
+                  onClick={() => setShowUpcoming(!showUpcoming)}
+                  className="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-[10px] font-black uppercase tracking-widest text-slate-600 hover:border-indigo-200 hover:text-indigo-600 transition-all shadow-sm"
+                >
+                  {showUpcoming ? "Скрыть ближайшие" : `Показать ближайшие (${upcoming.length})`}
+                  <svg className={`w-3 h-3 transition-transform ${showUpcoming ? "rotate-180" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+              </div>
+            )}
+
+            {showUpcoming && upcoming.map((t, i) => (
+              <TournamentRow
+                key={`upcoming-${i}`}
+                t={t}
+                actionLoading={actionLoading}
+                handleCreateTournament={handleCreateTournament}
+                disciplineSlug={disciplineSlug}
+              />
             ))}
           </ul>
         )}
@@ -228,5 +195,94 @@ export default function HltvTournamentsWidget({ disciplineSlug }: { disciplineSl
         <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Загрузка данных только по запросу</span>
       </div>
     </aside>
+  );
+}
+
+function TournamentRow({ 
+  t, 
+  actionLoading, 
+  handleCreateTournament, 
+  disciplineSlug 
+}: { 
+  t: HltvTournament; 
+  actionLoading: string | null; 
+  handleCreateTournament: (t: HltvTournament) => void; 
+  disciplineSlug: string; 
+}) {
+  return (
+    <li className="p-5 hover:bg-slate-50 transition-colors group relative">
+      <div className="flex justify-between items-center gap-4">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 mb-1.5">
+             <span className={`h-1.5 w-1.5 rounded-full ${t.status === 'ongoing' ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-slate-300'}`} />
+             <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">
+               {t.status === 'ongoing' ? 'Ongoing' : 'Upcoming'}
+             </span>
+             {t.isLinked && (
+               <span className="flex items-center gap-1 text-[8px] font-black text-indigo-500 uppercase bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100">
+                 <Check className="w-2.5 h-2.5" /> В базе данных
+               </span>
+             )}
+             {t.stars !== undefined && t.stars > 0 && (
+               <div className="flex items-center gap-0.5 ml-1">
+                 {[...Array(5)].map((_, i) => (
+                   <Star 
+                     key={i} 
+                     className={`w-2.5 h-2.5 ${i < t.stars! ? "text-amber-400 fill-amber-400" : "text-slate-200"}`} 
+                   />
+                 ))}
+               </div>
+             )}
+          </div>
+          <h3 className="text-sm font-black text-slate-950 leading-tight group-hover:text-indigo-600 transition-colors truncate mb-1">
+            {t.title}
+          </h3>
+          {t.dates && (
+            <div className="text-[10px] font-bold text-slate-400 mb-2 uppercase tracking-wide">
+              {t.dates}
+            </div>
+          )}
+          <div className="flex items-center gap-3">
+             <a 
+               href={t.url} 
+               target="_blank" 
+               rel="noopener noreferrer"
+               className="text-[9px] font-bold text-slate-400 hover:text-indigo-500 flex items-center gap-1 transition-colors"
+             >
+               <ExternalLink className="w-3 h-3" /> HLTV
+             </a>
+             {t.dbId && (
+               <Link 
+                 href={`/counterstrike/tournament/${t.dbId}`}
+                 className="text-[9px] font-bold text-slate-400 hover:text-indigo-500 flex items-center gap-1 transition-colors"
+               >
+                 <LinkIcon className="w-3 h-3" /> Открыть в админке
+               </Link>
+             )}
+          </div>
+        </div>
+
+        {!t.isLinked ? (
+          <button
+            onClick={() => handleCreateTournament(t)}
+            disabled={!!actionLoading}
+            className="shrink-0 p-2.5 rounded-xl bg-emerald-50 text-emerald-600 hover:bg-emerald-600 hover:text-white transition-all shadow-sm border border-emerald-100 flex items-center gap-2 group/btn"
+          >
+            {actionLoading === t.title ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <>
+                <Plus className="w-4 h-4" />
+                <span className="text-[10px] font-black uppercase tracking-widest hidden group-hover/btn:inline">Создать</span>
+              </>
+            )}
+          </button>
+        ) : (
+          <div className="shrink-0 p-2.5 rounded-xl bg-slate-50 text-slate-300 border border-slate-100">
+             <Check className="w-4 h-4" />
+          </div>
+        )}
+      </div>
+    </li>
   );
 }

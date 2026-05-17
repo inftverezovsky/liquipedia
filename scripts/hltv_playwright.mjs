@@ -337,63 +337,86 @@ async function scrapeHltv() {
       console.log(JSON.stringify({ ok: true, title }));
     } else if (MODE === 'events') {
       console.error('[HLTV Playwright] Scraping Ongoing and Upcoming Events...');
-      await page.goto('https://www.hltv.org/events', { waitUntil: 'load', timeout: 40000 });
+      await gotoHltvPage(page, 'https://www.hltv.org/events', 'events');
       
-      try {
-        await page.waitForSelector('.ongoing-events-holder, .upcoming-events-holder', { timeout: 10000 });
-      } catch (e) {}
+      await page.waitForSelector('.ongoing-events-holder, .events-holder', { timeout: 15000 });
 
       const events = await page.evaluate(() => {
         const results = [];
         const today = new Date();
+        today.setHours(0, 0, 0, 0); // Day-aligned bounds
+
         const nextWeek = new Date();
-        nextWeek.setDate(today.getDate() + 7);
+        nextWeek.setDate(today.getDate() + 14); // 14 days horizon, matching Liquipedia logic
+        nextWeek.setHours(23, 59, 59, 999);
 
         const parseDate = (dStr) => {
           try {
-            const parts = dStr.split('-')[0].trim().replace(/(st|nd|rd|th)/, '');
-            const yearMatch = dStr.match(/\d{4}/);
-            const year = yearMatch ? yearMatch[0] : new Date().getFullYear();
-            return new Date(`${parts} ${year}`);
+            const match = dStr.match(/(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2}(?:st|nd|rd|th)?/i);
+            if (!match) return null;
+            const parts = match[0].trim().replace(/(st|nd|rd|th)/gi, '');
+            const yearMatch = dStr.match(/\b(19\d{2}|20\d{2})\b/);
+            const year = yearMatch ? yearMatch[1] : new Date().getFullYear();
+            const date = new Date(`${parts} ${year}`);
+            return isNaN(date.getTime()) ? null : date;
           } catch(e) { return null; }
         };
 
+        const seenIds = new Set();
+
         // Ongoing
         document.querySelectorAll('.ongoing-event').forEach(el => {
-          const a = el.querySelector('a');
+          const a = el.tagName === 'A' ? el : el.querySelector('a');
           if (a) {
-            const title = el.querySelector('.event-name-container')?.textContent?.trim() || a.textContent.trim();
             const href = a.getAttribute('href');
-            const dates = el.querySelector('.event-date-container')?.textContent?.trim() || "";
-            const stars = el.querySelectorAll('.stars i.fa-star').length;
+            if (!href) return;
+            const parts = href.split('/');
+            const id = parts[2];
+            if (!id || seenIds.has(id)) return;
+            seenIds.add(id);
+
+            const titleEl = el.querySelector('.text-ellipsis, .event-name-container, .event-name-small, .big-event-name');
+            const title = titleEl?.textContent?.trim() || el.getAttribute('alt') || a.textContent.trim();
+            const datesEl = el.querySelector('.eventDetails, .event-date-container, .col-date, [class*="date"]');
+            const dates = datesEl?.textContent?.trim() || "";
+            const stars = el.querySelectorAll('.stars i.fa-star, .stars .fa-star, .star, [class*="star"]').length;
             results.push({
-              title,
-              id: href.split('/')[2],
+              title: title.replace(/\s+/g, ' ').trim(),
+              id,
               url: 'https://www.hltv.org' + href,
               status: 'ongoing',
-              dates,
+              dates: dates.replace(/\s+/g, ' ').trim(),
               stars: stars || 0
             });
           }
         });
+
         // Upcoming
-        document.querySelectorAll('.upcoming-event').forEach(el => {
-          const a = el.querySelector('a');
+        document.querySelectorAll('.small-event, .big-event').forEach(el => {
+          const a = el.tagName === 'A' ? el : el.querySelector('a');
           if (a) {
-             const title = el.querySelector('.event-name-container')?.textContent?.trim() || a.textContent.trim();
              const href = a.getAttribute('href');
-             const dates = el.querySelector('.event-date-container')?.textContent?.trim() || "";
-             const stars = el.querySelectorAll('.stars i.fa-star').length;
+             if (!href) return;
+             const parts = href.split('/');
+             const id = parts[2];
+             if (!id || seenIds.has(id)) return;
+
+             const titleEl = el.querySelector('.text-ellipsis, .event-name-container, .event-name-small, .big-event-name');
+             const title = titleEl?.textContent?.trim() || el.getAttribute('alt') || a.textContent.trim();
+             const datesEl = el.querySelector('.eventDetails, .event-date-container, .col-date, [class*="date"]');
+             const dates = datesEl?.textContent?.trim() || "";
+             const stars = el.querySelectorAll('.stars i.fa-star, .stars .fa-star, .star, [class*="star"]').length;
              
              const startDate = parseDate(dates);
-             // Filter: only if starts within 7 days
+             // Filter: only if starts within 14 days
              if (startDate && startDate <= nextWeek && startDate >= today) {
+               seenIds.add(id);
                results.push({
-                 title,
-                 id: href.split('/')[2],
+                 title: title.replace(/\s+/g, ' ').trim(),
+                 id,
                  url: 'https://www.hltv.org' + href,
                  status: 'upcoming',
-                 dates,
+                 dates: dates.replace(/\s+/g, ' ').trim(),
                  stars: stars || 0
                });
              }
